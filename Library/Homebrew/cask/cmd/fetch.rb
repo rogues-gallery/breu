@@ -1,14 +1,13 @@
+# typed: false
 # frozen_string_literal: true
 
 module Cask
   class Cmd
-    # Implementation of the `brew cask fetch` command.
+    # Cask implementation of the `brew fetch` command.
     #
     # @api private
     class Fetch < AbstractCommand
-      def self.min_named
-        :cask
-      end
+      extend T::Sig
 
       def self.parser
         super do
@@ -17,16 +16,12 @@ module Cask
         end
       end
 
-      def self.description
-        "Downloads remote application files to local cache."
-      end
-
+      sig { void }
       def run
         require "cask/download"
         require "cask/installer"
 
         options = {
-          force:      args.force?,
           quarantine: args.quarantine?,
         }.compact
 
@@ -35,9 +30,10 @@ module Cask
         casks.each do |cask|
           puts Installer.caveats(cask)
           ohai "Downloading external files for Cask #{cask}"
-          downloaded_path = Download.new(cask, **options).perform
-          Verify.all(cask, downloaded_path)
-          ohai "Success! Downloaded to -> #{downloaded_path}"
+          download = Download.new(cask, **options)
+          download.clear_cache if args.force?
+          downloaded_path = download.fetch
+          ohai "Success! Downloaded to: #{downloaded_path}"
         end
       end
     end

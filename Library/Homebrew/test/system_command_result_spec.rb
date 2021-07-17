@@ -1,3 +1,4 @@
+# typed: false
 # frozen_string_literal: true
 
 require "system_command"
@@ -44,7 +45,7 @@ describe SystemCommand::Result do
   end
 
   describe "#plist" do
-    subject { result.plist }
+    subject(:result_plist) { result.plist }
 
     let(:output_array) { [[:stdout, stdout]] }
     let(:garbage) {
@@ -115,7 +116,7 @@ describe SystemCommand::Result do
       }
 
       it "ignores garbage" do
-        expect(subject["system-entities"].length).to eq(3)
+        expect(result_plist["system-entities"].length).to eq(3)
       end
 
       context "when verbose" do
@@ -124,7 +125,7 @@ describe SystemCommand::Result do
         end
 
         it "warns about garbage" do
-          expect { subject }
+          expect { result_plist }
             .to output(a_string_containing(garbage)).to_stderr
         end
       end
@@ -139,7 +140,7 @@ describe SystemCommand::Result do
       }
 
       it "ignores garbage" do
-        expect(subject["system-entities"].length).to eq(3)
+        expect(result_plist["system-entities"].length).to eq(3)
       end
 
       context "when verbose" do
@@ -148,19 +149,19 @@ describe SystemCommand::Result do
         end
 
         it "warns about garbage" do
-          expect { subject }
+          expect { result_plist }
             .to output(a_string_containing(garbage)).to_stderr
         end
       end
     end
 
-    context "given a hdiutil stdout" do
+    context "when there's a hdiutil stdout" do
       let(:stdout) { plist }
 
       it "successfully parses it" do
-        expect(subject.keys).to eq(["system-entities"])
-        expect(subject["system-entities"].length).to eq(3)
-        expect(subject["system-entities"].map { |e| e["dev-entry"] })
+        expect(result_plist.keys).to eq(["system-entities"])
+        expect(result_plist["system-entities"].length).to eq(3)
+        expect(result_plist["system-entities"].map { |e| e["dev-entry"] })
           .to eq(["/dev/disk3s1", "/dev/disk3", "/dev/disk3s2"])
       end
     end
@@ -169,7 +170,7 @@ describe SystemCommand::Result do
       let(:stdout) { "" }
 
       it "returns nil" do
-        expect(subject).to be nil
+        expect(result_plist).to be nil
       end
     end
   end

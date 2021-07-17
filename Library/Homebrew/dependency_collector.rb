@@ -1,3 +1,4 @@
+# typed: true
 # frozen_string_literal: true
 
 require "dependency"
@@ -17,10 +18,13 @@ require "extend/cachable"
 # This class is used by `depends_on` in the formula DSL to turn dependency
 # specifications into the proper kinds of dependencies and requirements.
 class DependencyCollector
+  extend T::Sig
+
   extend Cachable
 
   attr_reader :deps, :requirements
 
+  sig { void }
   def initialize
     @deps = Dependencies.new
     @requirements = Requirements.new
@@ -81,10 +85,6 @@ class DependencyCollector
     Dependency.new("bzip2", tags) unless which("bzip2")
   end
 
-  def java_dep_if_needed(tags)
-    JavaRequirement.new(tags)
-  end
-
   def self.tar_needs_xz_dependency?
     !new.xz_dep_if_needed([]).nil?
   end
@@ -111,8 +111,6 @@ class DependencyCollector
   def parse_string_spec(spec, tags)
     if spec.match?(HOMEBREW_TAP_FORMULA_REGEX)
       TapDependency.new(spec, tags)
-    elsif tags.empty?
-      Dependency.new(spec, tags)
     else
       Dependency.new(spec, tags)
     end
@@ -122,13 +120,9 @@ class DependencyCollector
     case spec
     when :arch          then ArchRequirement.new(tags)
     when :codesign      then CodesignRequirement.new(tags)
-    when :java          then java_dep_if_needed(tags)
     when :linux         then LinuxRequirement.new(tags)
     when :macos         then MacOSRequirement.new(tags)
     when :maximum_macos then MacOSRequirement.new(tags, comparator: "<=")
-    when :osxfuse       then OsxfuseRequirement.new(tags)
-    when :tuntap        then TuntapRequirement.new(tags)
-    when :x11           then X11Requirement.new(tags)
     when :xcode         then XcodeRequirement.new(tags)
     else
       raise ArgumentError, "Unsupported special dependency #{spec.inspect}"

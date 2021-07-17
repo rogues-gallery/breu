@@ -1,13 +1,12 @@
+# typed: false
 # frozen_string_literal: true
 
 require "cmd/shared_examples/args_parse"
 
-describe "Homebrew.analytics_args" do
+describe "brew analytics" do
   it_behaves_like "parseable arguments"
-end
 
-describe "brew analytics", :integration_test do
-  it "when HOMEBREW_NO_ANALYTICS is unset is disabled after running `brew analytics off`" do
+  it "when HOMEBREW_NO_ANALYTICS is unset is disabled after running `brew analytics off`", :integration_test do
     HOMEBREW_REPOSITORY.cd do
       system "git", "init"
     end

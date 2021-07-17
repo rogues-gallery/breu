@@ -1,3 +1,4 @@
+# typed: true
 # frozen_string_literal: true
 
 require "dependable"
@@ -11,7 +12,10 @@ require "build_environment"
 #
 # @api private
 class Requirement
+  extend T::Sig
+
   include Dependable
+  extend Cachable
 
   attr_reader :tags, :name, :cask, :download
 
@@ -34,20 +38,21 @@ class Requirement
   end
 
   # The message to show when the requirement is not met.
+  sig { returns(String) }
   def message
     _, _, class_name = self.class.to_s.rpartition "::"
     s = "#{class_name} unsatisfied!\n"
     if cask
       s += <<~EOS
-        You can install with Homebrew Cask:
-          brew cask install #{cask}
+        You can install the necessary cask with:
+          brew install --cask #{cask}
       EOS
     end
 
     if download
       s += <<~EOS
         You can download from:
-          #{download}
+          #{Formatter.url(download)}
       EOS
     end
     s
@@ -78,7 +83,7 @@ class Requirement
     return unless @satisfied_result.is_a?(Pathname)
 
     parent = @satisfied_result.resolved_path.parent
-    if parent.to_s =~ %r{^#{Regexp.escape(HOMEBREW_CELLAR)}/([\w+-.@]+)/[^/]+/(s?bin)/?$}
+    if parent.to_s =~ %r{^#{Regexp.escape(HOMEBREW_CELLAR)}/([\w+-.@]+)/[^/]+/(s?bin)/?$}o
       parent = HOMEBREW_PREFIX/"opt/#{Regexp.last_match(1)}/#{Regexp.last_match(2)}"
     end
     parent
@@ -120,12 +125,13 @@ class Requirement
     name.hash ^ tags.hash
   end
 
+  sig { returns(String) }
   def inspect
-    "#<#{self.class.name}: #{name.inspect} #{tags.inspect}>"
+    "#<#{self.class.name}: #{tags.inspect}>"
   end
 
   def display_s
-    name
+    name.capitalize
   end
 
   def mktemp(&block)
@@ -136,8 +142,8 @@ class Requirement
 
   def infer_name
     klass = self.class.name || self.class.to_s
-    klass.sub!(/(Dependency|Requirement)$/, "")
-    klass.sub!(/^(\w+::)*/, "")
+    klass = klass.sub(/(Dependency|Requirement)$/, "")
+                 .sub(/^(\w+::)*/, "")
     return klass.downcase if klass.present?
 
     return @cask if @cask.present?
@@ -154,6 +160,8 @@ class Requirement
   end
 
   class << self
+    extend T::Sig
+
     include BuildEnvironment::DSL
 
     attr_reader :env_proc, :build
@@ -161,14 +169,14 @@ class Requirement
     attr_rw :fatal, :cask, :download
 
     def satisfy(options = nil, &block)
-      return @satisfied if options.nil? && !block_given?
+      return @satisfied if options.nil? && !block
 
       options = {} if options.nil?
       @satisfied = Satisfier.new(options, &block)
     end
 
     def env(*settings, &block)
-      if block_given?
+      if block
         @env_proc = block
       else
         super
@@ -212,7 +220,12 @@ class Requirement
     # the list.
     # The default filter, which is applied when a block is not given, omits
     # optionals and recommendeds based on what the dependent has asked for.
-    def expand(dependent, &block)
+    def expand(dependent, cache_key: nil, &block)
+      if cache_key.present?
+        cache[cache_key] ||= {}
+        return cache[cache_key][cache_id dependent].dup if cache[cache_key][cache_id dependent]
+      end
+
       reqs = Requirements.new
 
       formulae = dependent.recursive_dependencies.map(&:to_formula)
@@ -226,12 +239,13 @@ class Requirement
         end
       end
 
+      cache[cache_key][cache_id dependent] = reqs.dup if cache_key.present?
       reqs
     end
 
-    def prune?(dependent, req, &_block)
+    def prune?(dependent, req, &block)
       catch(:prune) do
-        if block_given?
+        if block
           yield dependent, req
         elsif req.optional? || req.recommended?
           prune unless dependent.build.with?(req)
@@ -240,8 +254,15 @@ class Requirement
     end
 
     # Used to prune requirements when calling expand with a block.
+    sig { void }
     def prune
       throw(:prune, true)
+    end
+
+    private
+
+    def cache_id(dependent)
+      "#{dependent.full_name}_#{dependent.class}"
     end
   end
 end

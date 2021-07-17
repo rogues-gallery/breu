@@ -1,10 +1,11 @@
+# typed: false
 # frozen_string_literal: true
 
 require "rubocops/shared/helper_functions"
 
 module RuboCop
   module Cop
-    # This module performs common checks the `desc` field in both Formulae and Casks.
+    # This module performs common checks the `desc` field in both formulae and casks.
     #
     # @api private
     module DescHelper
@@ -26,7 +27,6 @@ module RuboCop
         end
 
         @offensive_node = desc_call
-        @offense_source_range = desc_call.source_range
 
         desc = desc_call.first_argument
 
@@ -38,35 +38,41 @@ module RuboCop
         end
 
         # Check the desc for leading whitespace.
-        problem "Description shouldn't have leading spaces." if regex_match_group(desc, /^\s+/)
+        desc_problem "Description shouldn't have leading spaces." if regex_match_group(desc, /^\s+/)
 
         # Check the desc for trailing whitespace.
-        problem "Description shouldn't have trailing spaces." if regex_match_group(desc, /\s+$/)
+        desc_problem "Description shouldn't have trailing spaces." if regex_match_group(desc, /\s+$/)
 
         # Check if "command-line" is spelled incorrectly in the desc.
-        if match = regex_match_group(desc, /(command ?line)/i)
+        if (match = regex_match_group(desc, /(command ?line)/i))
           c = match.to_s[0]
-          problem "Description should use \"#{c}ommand-line\" instead of \"#{match}\"."
+          desc_problem "Description should use \"#{c}ommand-line\" instead of \"#{match}\"."
         end
 
-        # Check if the desc starts with "A" or "An".
-        if match = regex_match_group(desc, /^(an?)(?=\s)/i)
-          problem "Description shouldn't start with an indefinite article, i.e. \"#{match}\"."
-        end
+        # Check if the desc starts with an article.
+        desc_problem "Description shouldn't start with an article." if regex_match_group(desc, /^(the|an?)(?=\s)/i)
 
         # Check if invalid lowercase words are at the start of a desc.
         if !VALID_LOWERCASE_WORDS.include?(string_content(desc).split.first) &&
            regex_match_group(desc, /^[a-z]/)
-          problem "Description should start with a capital letter."
+          desc_problem "Description should start with a capital letter."
         end
 
         # Check if the desc starts with the formula's or cask's name.
-        name_regex = name.delete("-").split("").join('[\s\-]?')
-        problem "Description shouldn't start with the #{type} name." if regex_match_group(desc, /^#{name_regex}\b/i)
+        name_regex = name.delete("-").chars.join('[\s\-]?')
+        if regex_match_group(desc, /^#{name_regex}\b/i)
+          desc_problem "Description shouldn't start with the #{type} name."
+        end
+
+        if type == :cask &&
+           (match = regex_match_group(desc, /\b(macOS|Mac( ?OS( ?X)?)?|OS ?X)(?! virtual machines?)\b/i)) &&
+           match[1] != "MAC"
+          desc_problem "Description shouldn't contain the platform."
+        end
 
         # Check if a full stop is used at the end of a desc (apart from in the case of "etc.").
         if regex_match_group(desc, /\.$/) && !string_content(desc).end_with?("etc.")
-          problem "Description shouldn't end with a full stop."
+          desc_problem "Description shouldn't end with a full stop."
         end
 
         # Check if the desc length exceeds maximum length.
@@ -76,16 +82,17 @@ module RuboCop
                 "The current length is #{desc_length}."
       end
 
-      def autocorrect_desc(node, name)
-        lambda do |corrector|
-          /\A(?<quote>["'])(?<correction>.*)(?:\k<quote>)\Z/ =~ node.source
+      # Auto correct desc problems. `regex_match_group` must be called before this to populate @offense_source_range.
+      def desc_problem(message)
+        add_offense(@offensive_source_range, message: message) do |corrector|
+          /\A(?<quote>["'])(?<correction>.*)(?:\k<quote>)\Z/ =~ @offensive_node.source
 
           next if correction.nil?
 
           correction.gsub!(/^\s+/, "")
           correction.gsub!(/\s+$/, "")
 
-          correction.sub!(/^an?\s+/i, "")
+          correction.sub!(/^(the|an?)\s+/i, "")
 
           first_word = correction.split.first
           unless VALID_LOWERCASE_WORDS.include?(first_word)
@@ -94,12 +101,12 @@ module RuboCop
           end
 
           correction.gsub!(/(ommand ?line)/i, "ommand-line")
-          correction.gsub!(/(^|[^a-z])#{name}([^a-z]|$)/i, "\\1\\2")
+          correction.gsub!(/(^|[^a-z])#{@name}([^a-z]|$)/i, "\\1\\2")
           correction.gsub!(/^\s+/, "")
           correction.gsub!(/\s+$/, "")
           correction.gsub!(/\.$/, "")
 
-          corrector.replace(node.source_range, "#{quote}#{correction}#{quote}")
+          corrector.replace(@offensive_node.source_range, "#{quote}#{correction}#{quote}")
         end
       end
     end

@@ -1,3 +1,4 @@
+# typed: false
 # frozen_string_literal: true
 
 module Cask
@@ -6,6 +7,8 @@ module Cask
     #
     # @api private
     class Version < ::String
+      extend T::Sig
+
       DIVIDERS = {
         "." => :dots,
         "-" => :hyphens,
@@ -16,7 +19,7 @@ module Cask
 
       MAJOR_MINOR_PATCH_REGEX = /^([^.,:]+)(?:.([^.,:]+)(?:.([^.,:]+))?)?/.freeze
 
-      INVALID_CHARACTERS = /[^0-9a-zA-Z.,:\-_]/.freeze
+      INVALID_CHARACTERS = /[^0-9a-zA-Z.,:\-_+ ]/.freeze
 
       class << self
         private
@@ -61,17 +64,22 @@ module Cask
 
       attr_reader :raw_version
 
+      sig { params(raw_version: T.nilable(T.any(String, Symbol))).void }
       def initialize(raw_version)
         @raw_version = raw_version
         super(raw_version.to_s)
+
+        invalid = invalid_characters
+        raise TypeError, "#{raw_version} contains invalid characters: #{invalid.uniq.join}!" if invalid.present?
       end
 
       def invalid_characters
-        return [] if latest?
+        return [] if raw_version.blank? || latest?
 
         raw_version.scan(INVALID_CHARACTERS)
       end
 
+      sig { returns(T::Boolean) }
       def unstable?
         return false if latest?
 
@@ -83,56 +91,80 @@ module Cask
         false
       end
 
+      sig { returns(T::Boolean) }
       def latest?
         to_s == "latest"
       end
 
+      # @api public
+      sig { returns(T.self_type) }
       def major
         version { slice(MAJOR_MINOR_PATCH_REGEX, 1) }
       end
 
+      # @api public
+      sig { returns(T.self_type) }
       def minor
         version { slice(MAJOR_MINOR_PATCH_REGEX, 2) }
       end
 
+      # @api public
+      sig { returns(T.self_type) }
       def patch
         version { slice(MAJOR_MINOR_PATCH_REGEX, 3) }
       end
 
+      # @api public
+      sig { returns(T.self_type) }
       def major_minor
         version { [major, minor].reject(&:empty?).join(".") }
       end
 
+      # @api public
+      sig { returns(T.self_type) }
       def major_minor_patch
         version { [major, minor, patch].reject(&:empty?).join(".") }
       end
 
+      # @api public
+      sig { returns(T.self_type) }
       def minor_patch
         version { [minor, patch].reject(&:empty?).join(".") }
       end
 
+      # @api public
+      sig { returns(T.self_type) }
       def before_comma
         version { split(",", 2).first }
       end
 
+      # @api public
+      sig { returns(T.self_type) }
       def after_comma
         version { split(",", 2).second }
       end
 
+      # @api public
+      sig { returns(T.self_type) }
       def before_colon
         version { split(":", 2).first }
       end
 
+      # @api public
+      sig { returns(T.self_type) }
       def after_colon
         version { split(":", 2).second }
       end
 
+      # @api public
+      sig { returns(T.self_type) }
       def no_dividers
         version { gsub(DIVIDER_REGEX, "") }
       end
 
       private
 
+      sig { returns(T.self_type) }
       def version
         return self if empty? || latest?
 

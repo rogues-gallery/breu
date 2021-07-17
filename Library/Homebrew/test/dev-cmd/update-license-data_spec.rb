@@ -1,7 +1,8 @@
+# typed: false
 # frozen_string_literal: true
 
 require "cmd/shared_examples/args_parse"
 
-describe "Homebrew.update_license_data_args" do
+describe "brew update-license-data" do
   it_behaves_like "parseable arguments"
 end

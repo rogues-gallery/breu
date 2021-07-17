@@ -1,3 +1,4 @@
+# typed: false
 # frozen_string_literal: true
 
 require "extend/pathname"
@@ -59,19 +60,6 @@ describe Pathname do
       touch dir/".DS_Store"
       expect(dir.rmdir_if_possible).to be true
       expect(dir).not_to exist
-    end
-  end
-
-  describe "#write" do
-    it "creates a file and writes to it" do
-      expect(file).not_to exist
-      file.write("CONTENT")
-      expect(File.read(file)).to eq("CONTENT")
-    end
-
-    it "raises an error if the file already exists" do
-      touch file
-      expect { file.write("CONTENT") }.to raise_error(RuntimeError)
     end
   end
 

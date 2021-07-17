@@ -1,7 +1,7 @@
+# typed: false
 # frozen_string_literal: true
 
 require "formula_info"
-require "global"
 
 describe FormulaInfo, :integration_test do
   it "tests the FormulaInfo class" do

@@ -1,12 +1,50 @@
 # TODO: Try getting more rules in sync.
 
-require: ./Homebrew/rubocops.rb
+require:
+  - ./Homebrew/rubocops.rb
+  - rubocop-performance
+  - rubocop-rails
+
+inherit_mode:
+  merge:
+    - Include
+    - Exclude
 
 AllCops:
   TargetRubyVersion: 2.6
   DisplayCopNames: false
   # enable all pending rubocops
   NewCops: enable
+  Include:
+    - "**/*.rbi"
+  Exclude:
+    - "Homebrew/sorbet/rbi/gems/**/*.rbi"
+    - "Homebrew/sorbet/rbi/hidden-definitions/**/*.rbi"
+    - "Homebrew/sorbet/rbi/todo.rbi"
+    - "Homebrew/sorbet/rbi/upstream.rbi"
+    - "Homebrew/bin/*"
+    - "Homebrew/vendor/**/*"
+    - "Taps/*/*/vendor/**/*"
+
+Cask/Desc:
+  Description: "Ensure that the desc stanza conforms to various content and style checks."
+  Enabled: true
+
+Cask/HomepageUrlTrailingSlash:
+  Description: "Ensure that the homepage url has a slash after the domain name."
+  Enabled: true
+
+Cask/NoDslVersion:
+  Description: "Do not use the deprecated DSL version syntax in your cask header."
+  Enabled: true
+
+Cask/StanzaGrouping:
+  Description: "Ensure that cask stanzas are grouped correctly. More info at https://docs.brew.sh/Cask-Cookbook#stanza-order"
+  Enabled: true
+
+Cask/StanzaOrder:
+  Description: "Ensure that cask stanzas are sorted correctly. More info at https://docs.brew.sh/Cask-Cookbook#stanza-order"
+  Enabled: true
 
 # enable all formulae audits
 FormulaAudit:
@@ -16,32 +54,64 @@ FormulaAudit:
 FormulaAuditStrict:
   Enabled: true
 
+# enable all Homebrew custom cops
+Homebrew:
+  Enabled: true
+
+# makes DSL usage ugly.
+Layout/SpaceBeforeBrackets:
+  Exclude:
+    - "**/*_spec.rb"
+    - "Taps/*/*/*.rb"
+    - "/**/{Formula,Casks}/*.rb"
+    - "**/{Formula,Casks}/*.rb"
+
 # Use `<<~` for heredocs.
 Layout/HeredocIndentation:
   Enabled: true
-
-# Not useful in casks and formulae.
-Metrics/BlockLength:
-  Enabled: false
 
 # Keyword arguments don't have the same readability
 # problems as normal parameters.
 Metrics/ParameterLists:
   CountKeywordArgs: false
 
+# Allow dashes in filenames.
+Naming/FileName:
+  Regex: !ruby/regexp /^[\w\@\-\+\.]+(\.rb)?$/
+
 # Implicitly allow EOS as we use it everywhere.
 Naming/HeredocDelimiterNaming:
   ForbiddenDelimiters:
     - END, EOD, EOF
 
-# Allow dashes in filenames.
-Naming/FileName:
-  Regex: !ruby/regexp /^[\w\@\-\+\.]+(\.rb)?$/
+Naming/InclusiveLanguage:
+  CheckStrings: true
+  FlaggedTerms:
+    # TODO: If possible, make this stricter.
+    slave:
+      AllowedRegex:
+        - "gitslave"   # Used in formula `gitslave`
+        - "log_slave"  # Used in formula `ssdb`
+        - "ssdb_slave" # Used in formula `ssdb`
+        - "var_slave"  # Used in formula `ssdb`
+        - "patches/13_fix_scope_for_show_slave_status_data.patch" # Used in formula `mytop`
+    blacklist:
+      AllowedRegex:
+        - "--listBlacklist" # Used in formula `xmlsectool`
+
+Naming/MethodName:
+  IgnoredPatterns:
+    - '\A(fetch_)?HEAD\?\Z'
 
 # Both styles are used depending on context,
 # e.g. `sha256` and `something_countable_1`.
 Naming/VariableNumber:
   Enabled: false
+
+# Require &&/|| instead of and/or
+Style/AndOr:
+  Enabled: true
+  EnforcedStyle: always
 
 # Avoid leaking resources.
 Style/AutoResourceCleanup:
@@ -70,7 +140,10 @@ Style/HashTransformValues:
 
 # Allow for license expressions
 Style/HashAsLastArrayItem:
-  Enabled: false
+  Exclude:
+    - "Taps/*/*/*.rb"
+    - "/**/Formula/*.rb"
+    - "**/Formula/*.rb"
 
 # Enabled now LineLength is lowish.
 Style/IfUnlessModifier:
@@ -80,6 +153,8 @@ Style/IfUnlessModifier:
 Style/NumericLiterals:
   MinDigits: 7
   Strict: true
+  Exclude:
+    - "**/Brewfile"
 
 # Zero-prefixed octal literals are widely used and understood.
 Style/NumericLiteralPrefix:
@@ -123,18 +198,50 @@ Performance/CaseWhenSplat:
 Performance/Caller:
   Enabled: false
 
-# don't allow cops to be disabled in formulae
+# Makes code less readable for minor performance increases.
+Performance/MethodObjectAsBlock:
+  Enabled: false
+
+# Cannot use ActiveSupport in RuboCops.
+Rails:
+  Exclude:
+    - "Homebrew/rubocops/**/*"
+
+# Skip these as they only apply to actual Rails and not our ActiveSupport usage.
+Rails/ArelStar:
+  Enabled: false
+Rails/Date:
+  Enabled: false
+Rails/Delegate:
+  Enabled: false
+Rails/RakeEnvironment:
+  Enabled: false
+Rails/SkipsModelValidations:
+  Enabled: false
+Rails/Pluck:
+  Enabled: false
+Rails/TimeZone:
+  Enabled: false
+
+# Don't allow cops to be disabled in casks and formulae.
 Style/DisableCopsWithinSourceCodeDirective:
   Enabled: true
+  Include:
+    - "Taps/*/*/*.rb"
+    - "/**/{Formula,Casks}/*.rb"
+    - "**/{Formula,Casks}/*.rb"
 
 # make our hashes consistent
 Layout/HashAlignment:
   EnforcedHashRocketStyle: table
   EnforcedColonStyle: table
 
-# `system` is a special case and aligns on second argument
+# `system` is a special case and aligns on second argument, so allow this for formulae.
 Layout/ArgumentAlignment:
-  Enabled: false
+  Exclude:
+    - "Taps/*/*/*.rb"
+    - "/**/Formula/*.rb"
+    - "**/Formula/*.rb"
 
 # this is a bit less "floaty"
 Layout/CaseIndentation:
@@ -152,65 +259,202 @@ Layout/SpaceAroundOperators:
 Layout/RescueEnsureAlignment:
   Enabled: false
 
+# significantly less indentation involved; more consistent
+Layout/FirstArrayElementIndentation:
+  EnforcedStyle: consistent
+Layout/FirstHashElementIndentation:
+  EnforcedStyle: consistent
+
 # favour parens-less DSL-style arguments
 Lint/AmbiguousBlockAssociation:
   Enabled: false
 
-# so many of these in formulae and can't be autocorrected
-# TODO: fix these as `ruby -w` complains about them.
-Lint/AmbiguousRegexpLiteral:
-  Enabled: false
+Lint/DuplicateBranch:
+  Exclude:
+    - "Taps/*/*/*.rb"
+    - "/**/{Formula,Casks}/*.rb"
+    - "**/{Formula,Casks}/*.rb"
+
+# needed for lazy_object magic
+Naming/MemoizedInstanceVariableName:
+  Exclude:
+    - "Homebrew/lazy_object.rb"
+
+# useful for metaprogramming in RSpec
+Lint/ConstantDefinitionInBlock:
+  Exclude:
+    - "**/*_spec.rb"
 
 # so many of these in formulae and can't be autocorrected
 Lint/ParenthesesAsGroupedExpression:
-  Enabled: false
+  Exclude:
+    - "Taps/*/*/*.rb"
+    - "/**/Formula/*.rb"
+    - "**/Formula/*.rb"
 
-# most metrics don't make sense to apply for formulae/taps
+# Most metrics don't make sense to apply for casks/formulae/taps.
 Metrics/AbcSize:
-  Enabled: false
+  Exclude:
+    - "Taps/**/*"
+    - "/**/{Formula,Casks}/*.rb"
+    - "**/{Formula,Casks}/*.rb"
+Metrics/BlockLength:
+  Exclude:
+    - "Taps/**/*"
+    - "/**/{Formula,Casks}/*.rb"
+    - "**/{Formula,Casks}/*.rb"
 Metrics/ClassLength:
-  Enabled: false
+  Exclude:
+    - "Taps/**/*"
+    - "/**/{Formula,Casks}/*.rb"
+    - "**/{Formula,Casks}/*.rb"
 Metrics/CyclomaticComplexity:
-  Enabled: false
+  Exclude:
+    - "Taps/**/*"
+    - "/**/{Formula,Casks}/*.rb"
+    - "**/{Formula,Casks}/*.rb"
 Metrics/MethodLength:
-  Enabled: false
+  Exclude:
+    - "Taps/**/*"
+    - "/**/{Formula,Casks}/*.rb"
+    - "**/{Formula,Casks}/*.rb"
 Metrics/ModuleLength:
-  Enabled: false
+  Exclude:
+    - "Taps/**/*"
+    - "/**/{Formula,Casks}/*.rb"
+    - "**/{Formula,Casks}/*.rb"
 Metrics/PerceivedComplexity:
-  Enabled: false
+  Exclude:
+    - "Taps/**/*"
+    - "/**/{Formula,Casks}/*.rb"
+    - "**/{Formula,Casks}/*.rb"
+
+# allow those that are standard
+# TODO: try to remove some of these
+Naming/MethodParameterName:
+  AllowedNames:
+    - "_"
+    - "a"
+    - "b"
+    - "cc"
+    - "c1"
+    - "c2"
+    - "d"
+    - "e"
+    - "f"
+    - "ff"
+    - "fn"
+    - "id"
+    - "io"
+    - "o"
+    - "p"
+    - "pr"
+    - "r"
+    - "rb"
+    - "s"
+    - "to"
+    - "v"
 
 # GitHub diff UI wraps beyond 118 characters
 Layout/LineLength:
   Max: 118
   # ignore manpage comments and long single-line strings
-  IgnoredPatterns: ['#: ', ' url "', ' mirror "', ' plist_options ',
-                    ' appcast "', ' executable: "', ' font "', ' homepage "', ' name "',
-                    ' pkg "', ' pkgutil: "', '#{language}', '#{version.',
-                    ' "/Library/Application Support/', '"/Library/Caches/', '"/Library/PreferencePanes/',
-                    ' "~/Library/Application Support/', '"~/Library/Caches/', '"~/Application Support',
-                    ' was verified as official when first introduced to the cask']
+  IgnoredPatterns:
+    [
+      "#: ",
+      ' url "',
+      ' mirror "',
+      " plist_options ",
+      ' appcast "',
+      ' executable: "',
+      ' font "',
+      ' homepage "',
+      ' name "',
+      ' pkg "',
+      ' pkgutil: "',
+      "    sha256 cellar: ",
+      "    sha256  ",
+      "#{language}",
+      "#{version.",
+      ' "/Library/Application Support/',
+      '"/Library/Caches/',
+      '"/Library/PreferencePanes/',
+      ' "~/Library/Application Support/',
+      '"~/Library/Caches/',
+      '"~/Application Support',
+      " was verified as official when first introduced to the cask",
+    ]
+
+Sorbet/FalseSigil:
+  Exclude:
+    - "Taps/**/*"
+    - "/**/{Formula,Casks}/*.rb"
+    - "**/{Formula,Casks}/*.rb"
+    - "Homebrew/test/**/Casks/**/*.rb"
+
+Sorbet/StrictSigil:
+  Enabled: true
+  Include:
+    - "**/*.rbi"
+
+# Try getting rid of these.
+Sorbet/ConstantsFromStrings:
+  Enabled: false
+
+# Avoid false positives on modifiers used on symbols of methods
+# See https://github.com/rubocop-hq/rubocop/issues/5953
+Style/AccessModifierDeclarations:
+  Enabled: false
+
+# Conflicts with type signatures on `attr_*`s.
+Style/AccessorGrouping:
+  Enabled: false
+
+# make rspec formatting more flexible
+Style/BlockDelimiters:
+  Exclude:
+    - "Homebrew/**/*_spec.rb"
+    - "Homebrew/**/shared_examples/**/*.rb"
 
 # TODO: remove this when possible.
 Style/ClassVars:
   Exclude:
-  - '**/developer/bin/*'
+    - "**/developer/bin/*"
 
-# most of our APIs are internal so don't require docs
+# Don't enforce documentation in casks or formulae.
 Style/Documentation:
- Enabled: false
+  Exclude:
+    - "Taps/**/*"
+    - "/**/{Formula,Casks}/*.rb"
+    - "**/{Formula,Casks}/*.rb"
+    - "**/*.rbi"
 
-# don't want this for formulae but re-enabled for Library/Homebrew
+Style/DocumentationMethod:
+  Include:
+    - "Homebrew/formula.rb"
+
+# Not used for casks and formulae.
 Style/FrozenStringLiteralComment:
-  Enabled: false
+  EnforcedStyle: always
+  Exclude:
+    - "Taps/*/*/*.rb"
+    - "/**/{Formula,Casks}/*.rb"
+    - "**/{Formula,Casks}/*.rb"
+    - "Homebrew/test/**/Casks/**/*.rb"
+    - "**/*.rbi"
+    - "**/Brewfile"
 
 # TODO: remove this when possible.
 Style/GlobalVars:
   Exclude:
-  - '**/developer/bin/*'
+    - "**/developer/bin/*"
 
 # potential for errors in formulae too high with this
 Style/GuardClause:
-  Enabled: false
+  Exclude:
+    - "Taps/*/*/*.rb"
+    - "/**/{Formula,Casks}/*.rb"
+    - "**/{Formula,Casks}/*.rb"
 
 # avoid hash rockets where possible
 Style/HashSyntax:
@@ -218,7 +462,10 @@ Style/HashSyntax:
 
 # so many of these in formulae and can't be autocorrected
 Style/StringConcatenation:
-  Enabled: false
+  Exclude:
+    - "Taps/*/*/*.rb"
+    - "/**/{Formula,Casks}/*.rb"
+    - "**/{Formula,Casks}/*.rb"
 
 # ruby style guide favorite
 Style/StringLiterals:
@@ -231,6 +478,11 @@ Style/StringLiteralsInInterpolation:
 # make things a bit easier to read
 Style/TernaryParentheses:
   EnforcedStyle: require_parentheses_when_complex
+
+# `unless ... ||` and `unless ... &&` are hard to mentally parse
+Style/UnlessLogicalOperators:
+  Enabled: true
+  EnforcedStyle: forbid_logical_operators
 
 # a bit confusing to non-Rubyists but useful for longer arrays
 Style/WordArray:

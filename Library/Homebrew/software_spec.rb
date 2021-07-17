@@ -1,6 +1,8 @@
+# typed: false
 # frozen_string_literal: true
 
 require "resource"
+require "download_strategy"
 require "checksum"
 require "version"
 require "options"
@@ -9,11 +11,14 @@ require "dependency_collector"
 require "utils/bottles"
 require "patch"
 require "compilers"
-require "global"
 require "os/mac/version"
+require "extend/on_os"
 
 class SoftwareSpec
+  extend T::Sig
+
   extend Forwardable
+  include OnOS
 
   PREDEFINED_OPTIONS = {
     universal: Option.new("universal", "Build a universal binary"),
@@ -26,7 +31,9 @@ class SoftwareSpec
 
   def_delegators :@resource, :stage, :fetch, :verify_download_integrity, :source_modified_time, :download_name,
                  :cached_download, :clear_cache, :checksum, :mirrors, :specs, :using, :version, :mirror,
-                 :downloader, *Checksum::TYPES
+                 :downloader
+
+  def_delegators :@resource, :sha256
 
   def initialize(flags: [])
     @resource = Resource.new
@@ -77,6 +84,7 @@ class SoftwareSpec
     @bottle_disable_reason.unneeded?
   end
 
+  sig { returns(T::Boolean) }
   def bottle_disabled?
     @bottle_disable_reason ? true : false
   end
@@ -85,9 +93,13 @@ class SoftwareSpec
     !bottle_specification.collector.keys.empty?
   end
 
+  def bottle_tag?
+    bottle_specification.tag?(Utils::Bottles.tag)
+  end
+
   def bottled?
-    bottle_specification.tag?(Utils::Bottles.tag) && \
-      (bottle_specification.compatible_cellar? || owner.force_bottle)
+    bottle_tag? && \
+      (bottle_specification.compatible_locations? || owner.force_bottle)
   end
 
   def bottle(disable_type = nil, disable_reason = nil, &block)
@@ -103,7 +115,7 @@ class SoftwareSpec
   end
 
   def resource(name, klass = Resource, &block)
-    if block_given?
+    if block
       raise DuplicateResourceError, name if resource_defined?(name)
 
       res = klass.new(name, &block)
@@ -166,7 +178,7 @@ class SoftwareSpec
   end
 
   def uses_from_macos(spec, _bounds = {})
-    spec = Hash[*spec.first] if spec.is_a?(Hash)
+    spec = spec.dup.shift if spec.is_a?(Hash)
     depends_on(spec)
   end
 
@@ -215,13 +227,6 @@ class SoftwareSpec
     end
   end
 
-  # TODO
-  def add_legacy_patches(list)
-    list = Patch.normalize_legacy_patches(list)
-    list.each { |p| p.owner = self }
-    patches.concat(list)
-  end
-
   def add_dep_option(dep)
     dep.option_names.each do |name|
       if dep.optional? && !option_defined?("with-#{name}")
@@ -246,6 +251,8 @@ end
 
 class Bottle
   class Filename
+    extend T::Sig
+
     attr_reader :name, :version, :tag, :rebuild
 
     def self.create(formula, tag, rebuild)
@@ -259,19 +266,26 @@ class Bottle
       @rebuild = rebuild
     end
 
+    sig { returns(String) }
     def to_s
       "#{name}--#{version}#{extname}"
     end
     alias to_str to_s
 
+    sig { returns(String) }
     def json
       "#{name}--#{version}.#{tag}.bottle.json"
     end
 
-    def bintray
+    def url_encode
       ERB::Util.url_encode("#{name}-#{version}#{extname}")
     end
 
+    def github_packages
+      "#{name}--#{version}#{extname}"
+    end
+
+    sig { returns(String) }
     def extname
       s = rebuild.positive? ? ".#{rebuild}" : ""
       ".#{tag}.bottle#{s}.tar.gz"
@@ -282,30 +296,50 @@ class Bottle
 
   attr_reader :name, :resource, :prefix, :cellar, :rebuild
 
-  def_delegators :resource, :url, :fetch, :verify_download_integrity
-  def_delegators :resource, :cached_download, :clear_cache
+  def_delegators :resource, :url, :verify_download_integrity
+  def_delegators :resource, :cached_download
 
-  def initialize(formula, spec)
+  def initialize(formula, spec, tag = nil)
     @name = formula.name
     @resource = Resource.new
     @resource.owner = formula
     @resource.specs[:bottle] = true
     @spec = spec
 
-    checksum, tag = spec.checksum_for(Utils::Bottles.tag)
+    bottle_tag = if tag.present?
+      Utils::Bottles::Tag.from_symbol(tag)
+    else
+      Utils::Bottles.tag
+    end
+    checksum, tag, cellar = spec.checksum_for(bottle_tag)
 
-    filename = Filename.create(formula, tag, spec.rebuild)
-    @resource.url("#{spec.root_url}/#{filename.bintray}",
-                  select_download_strategy(spec.root_url_specs))
+    @prefix = spec.prefix
+    @tag = tag
+    @cellar = cellar
+    @rebuild = spec.rebuild
+
     @resource.version = formula.pkg_version
     @resource.checksum = checksum
-    @prefix = spec.prefix
-    @cellar = spec.cellar
-    @rebuild = spec.rebuild
+
+    root_url(spec.root_url, spec.root_url_specs)
   end
 
-  def compatible_cellar?
-    @spec.compatible_cellar?
+  def fetch(verify_download_integrity: true)
+    @resource.fetch(verify_download_integrity: verify_download_integrity)
+  rescue DownloadError
+    raise unless fallback_on_error
+
+    fetch_tab
+    retry
+  end
+
+  def clear_cache
+    @resource.clear_cache
+    github_packages_manifest_resource&.clear_cache
+  end
+
+  def compatible_locations?
+    @spec.compatible_locations?
   end
 
   # Does the bottle need to be relocated?
@@ -317,83 +351,263 @@ class Bottle
     resource.downloader.stage
   end
 
+  def fetch_tab
+    return if github_packages_manifest_resource.blank?
+
+    # a checksum is used later identifying the correct tab but we do not have the checksum for the manifest/tab
+    github_packages_manifest_resource.fetch(verify_download_integrity: false)
+
+    begin
+      JSON.parse(github_packages_manifest_resource.cached_download.read)
+    rescue JSON::ParserError
+      raise DownloadError.new(
+        github_packages_manifest_resource,
+        RuntimeError.new("The downloaded GitHub Packages manifest was corrupted or modified (it is not valid JSON):"\
+                         "\n#{github_packages_manifest_resource.cached_download}"),
+      )
+    end
+  rescue DownloadError
+    raise unless fallback_on_error
+
+    retry
+  end
+
+  def tab_attributes
+    return {} unless github_packages_manifest_resource&.downloaded?
+
+    manifest_json = github_packages_manifest_resource.cached_download.read
+
+    json = begin
+      JSON.parse(manifest_json)
+    rescue JSON::ParserError
+      raise "The downloaded GitHub Packages manifest was corrupted or modified (it is not valid JSON): "\
+            "\n#{github_packages_manifest_resource.cached_download}"
+    end
+
+    manifests = json["manifests"]
+    raise ArgumentError, "Missing 'manifests' section." if manifests.blank?
+
+    manifests_annotations = manifests.map { |m| m["annotations"] }
+    raise ArgumentError, "Missing 'annotations' section." if manifests_annotations.blank?
+
+    bottle_digest = @resource.checksum.hexdigest
+    image_ref = GitHubPackages.version_rebuild(@resource.version, rebuild, @tag.to_s)
+    manifest_annotations = manifests_annotations.find do |m|
+      next if m["sh.brew.bottle.digest"] != bottle_digest
+
+      m["org.opencontainers.image.ref.name"] == image_ref
+    end
+    raise ArgumentError, "Couldn't find manifest matching bottle checksum." if manifest_annotations.blank?
+
+    tab = manifest_annotations["sh.brew.tab"]
+    raise ArgumentError, "Couldn't find tab from manifest." if tab.blank?
+
+    begin
+      JSON.parse(tab)
+    rescue JSON::ParserError
+      raise ArgumentError, "Couldn't parse tab JSON."
+    end
+  end
+
   private
 
+  def github_packages_manifest_resource
+    return if @resource.download_strategy != CurlGitHubPackagesDownloadStrategy
+
+    @github_packages_manifest_resource ||= begin
+      resource = Resource.new("#{name}_bottle_manifest")
+
+      version_rebuild = GitHubPackages.version_rebuild(@resource.version, rebuild)
+      resource.version(version_rebuild)
+
+      image_name = GitHubPackages.image_formula_name(@name)
+      image_tag = GitHubPackages.image_version_rebuild(version_rebuild)
+      resource.url("#{root_url}/#{image_name}/manifests/#{image_tag}", {
+        using:   CurlGitHubPackagesDownloadStrategy,
+        headers: ["Accept: application/vnd.oci.image.index.v1+json"],
+      })
+      resource.downloader.resolved_basename = "#{name}-#{version_rebuild}.bottle_manifest.json"
+      resource
+    end
+  end
+
   def select_download_strategy(specs)
-    specs[:using] ||= DownloadStrategyDetector.detect(@spec.root_url)
+    specs[:using] ||= DownloadStrategyDetector.detect(@root_url)
     specs
+  end
+
+  def fallback_on_error
+    # Use the default bottle domain as a fallback mirror
+    if @resource.url.start_with?(Homebrew::EnvConfig.bottle_domain) &&
+       Homebrew::EnvConfig.bottle_domain != HOMEBREW_BOTTLE_DEFAULT_DOMAIN
+      opoo "Bottle missing, falling back to the default domain..."
+      root_url(HOMEBREW_BOTTLE_DEFAULT_DOMAIN)
+      @github_packages_manifest_resource = nil
+      true
+    else
+      false
+    end
+  end
+
+  def root_url(val = nil, specs = {})
+    return @root_url if val.nil?
+
+    @root_url = val
+
+    filename = Filename.create(resource.owner, @tag, @spec.rebuild)
+    path, resolved_basename = Utils::Bottles.path_resolved_basename(val, name, resource.checksum, filename)
+    @resource.url("#{val}/#{path}", select_download_strategy(specs))
+    @resource.downloader.resolved_basename = resolved_basename if resolved_basename.present?
   end
 end
 
 class BottleSpecification
-  DEFAULT_PREFIX = Homebrew::DEFAULT_PREFIX
+  extend T::Sig
 
-  attr_rw :prefix, :cellar, :rebuild
+  attr_rw :rebuild
   attr_accessor :tap
-  attr_reader :checksum, :collector, :root_url_specs
+  attr_reader :all_tags_cellar, :collector, :root_url_specs, :repository, :prefix
 
+  sig { void }
   def initialize
     @rebuild = 0
     @prefix = Homebrew::DEFAULT_PREFIX
-    @cellar = Homebrew::DEFAULT_CELLAR
+    @repository = Homebrew::DEFAULT_REPOSITORY
     @collector = Utils::Bottles::Collector.new
     @root_url_specs = {}
   end
 
   def root_url(var = nil, specs = {})
     if var.nil?
-      @root_url ||= "#{Homebrew::EnvConfig.bottle_domain}/#{Utils::Bottles::Bintray.repository(tap)}"
+      @root_url ||= if (github_packages_url = GitHubPackages.root_url_if_match(Homebrew::EnvConfig.bottle_domain))
+        github_packages_url
+      else
+        Homebrew::EnvConfig.bottle_domain
+      end
     else
-      @root_url = var
+      @root_url = if (github_packages_url = GitHubPackages.root_url_if_match(var))
+        github_packages_url
+      else
+        var
+      end
       @root_url_specs.merge!(specs)
     end
   end
 
-  def compatible_cellar?
-    cellar == :any || cellar == :any_skip_relocation || cellar == HOMEBREW_CELLAR.to_s
+  def cellar(val = nil)
+    if val.present?
+      odisabled(
+        "`cellar` in a bottle block",
+        "`brew style --fix` on the formula to update the style or use `sha256` with a `cellar:` argument",
+      )
+    end
+
+    if val.nil?
+      return collector.dig(Utils::Bottles.tag.to_sym, :cellar) || @all_tags_cellar || Homebrew::DEFAULT_CELLAR
+    end
+
+    @all_tags_cellar = val
   end
 
-  # Does the {Bottle} this BottleSpecification belongs to need to be relocated?
+  def compatible_locations?
+    # this looks like it should check prefix and repository too but to be
+    # `cellar :any` actually requires no references to the cellar, prefix or
+    # repository.
+    return true if [:any, :any_skip_relocation].include?(cellar)
+
+    compatible_cellar = cellar == HOMEBREW_CELLAR.to_s
+    compatible_prefix = prefix == HOMEBREW_PREFIX.to_s
+
+    compatible_cellar && compatible_prefix
+  end
+
+  # Does the {Bottle} this {BottleSpecification} belongs to need to be relocated?
+  sig { returns(T::Boolean) }
   def skip_relocation?
     cellar == :any_skip_relocation
   end
 
-  def tag?(tag)
-    checksum_for(tag) ? true : false
+  sig { params(tag: T.any(Symbol, Utils::Bottles::Tag), no_older_versions: T::Boolean).returns(T::Boolean) }
+  def tag?(tag, no_older_versions: false)
+    checksum_for(tag, no_older_versions: no_older_versions) ? true : false
   end
 
-  # Checksum methods in the DSL's bottle block optionally take
+  # Checksum methods in the DSL's bottle block take
   # a Hash, which indicates the platform the checksum applies on.
-  Checksum::TYPES.each do |cksum|
-    define_method(cksum) do |val|
-      digest, tag = val.shift
-      collector[tag] = Checksum.new(cksum, digest)
+  # Example bottle block syntax:
+  # bottle do
+  #  sha256 cellar: :any_skip_relocation, big_sur: "69489ae397e4645..."
+  #  sha256 cellar: :any, catalina: "449de5ea35d0e94..."
+  # end
+  def sha256(hash)
+    sha256_regex = /^[a-f0-9]{64}$/i
+
+    # find new `sha256 big_sur: "69489ae397e4645..."` format
+    tag, digest = hash.find do |key, value|
+      key.is_a?(Symbol) && value.is_a?(String) && value.match?(sha256_regex)
     end
+
+    if digest && tag
+      # the cellar hash key only exists on the new format
+      cellar = hash[:cellar]
+    else
+      # otherwise, find old `sha256 "69489ae397e4645..." => :big_sur` format
+      digest, tag = hash.find do |key, value|
+        key.is_a?(String) && value.is_a?(Symbol) && key.match?(sha256_regex)
+      end
+
+      if digest && tag
+        odisabled(
+          '`sha256 "digest" => :tag` in a bottle block',
+          '`brew style --fix` on the formula to update the style or use `sha256 tag: "digest"`',
+        )
+      end
+    end
+
+    tag = Utils::Bottles::Tag.from_symbol(tag)
+
+    cellar ||= all_tags_cellar
+    cellar ||= tag.default_cellar
+
+    collector[tag.to_sym] = { checksum: Checksum.new(digest), cellar: cellar }
   end
 
-  def checksum_for(tag)
-    collector.fetch_checksum_for(tag)
+  sig {
+    params(
+      tag:               T.any(Symbol, Utils::Bottles::Tag),
+      no_older_versions: T::Boolean,
+    ).returns(
+      T.nilable([Checksum, Symbol, T.any(Symbol, String)]),
+    )
+  }
+  def checksum_for(tag, no_older_versions: false)
+    collector.fetch_checksum_for(tag, no_older_versions: no_older_versions)
   end
 
   def checksums
-    tags = collector.keys.sort_by do |tag|
-      # Sort non-MacOS tags below MacOS tags.
-
-      OS::Mac::Version.from_symbol tag
+    tags = collector.keys.sort_by do |sym|
+      tag = Utils::Bottles::Tag.from_symbol(sym)
+      version = tag.to_macos_version
+      # Give arm64 bottles a higher priority so they are first
+      priority = tag.arch == :arm64 ? "2" : "1"
+      "#{priority}.#{version}_#{sym}"
     rescue MacOSVersionError
-      "0.#{tag}"
+      # Sort non-MacOS tags below MacOS tags.
+      "0.#{sym}"
     end
-    checksums = {}
-    tags.reverse_each do |tag|
-      checksum = collector[tag]
-      checksums[checksum.hash_type] ||= []
-      checksums[checksum.hash_type] << { checksum => tag }
+    tags.reverse.map do |tag|
+      {
+        "tag"    => tag,
+        "digest" => collector[tag][:checksum],
+        "cellar" => collector[tag][:cellar],
+      }
     end
-    checksums
   end
 end
 
 class PourBottleCheck
+  include OnOS
+
   def initialize(formula)
     @formula = formula
   end

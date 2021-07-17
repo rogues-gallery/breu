@@ -1,3 +1,4 @@
+# typed: false
 # frozen_string_literal: true
 
 require "language/perl"
@@ -36,7 +37,7 @@ describe Language::Perl::Shebang do
       Utils::Shebang.rewrite_shebang described_class.detected_perl_shebang(f), file
 
       expected_shebang = if OS.mac?
-        "/usr/bin/perl"
+        "/usr/bin/perl#{MacOS.preferred_perl_version}"
       else
         HOMEBREW_PREFIX/"opt/perl/bin/perl"
       end

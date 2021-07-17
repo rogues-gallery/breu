@@ -1,3 +1,4 @@
+# typed: false
 # frozen_string_literal: true
 
 require "cli/parser"
@@ -75,15 +76,18 @@ ensure
 end
 
 module Homebrew
+  extend T::Sig
+
   module_function
 
+  sig { returns(CLI::Parser) }
   def extract_args
     Homebrew::CLI::Parser.new do
-      usage_banner <<~EOS
-        `extract` [<options>] <formula> <tap>
-
+      usage_banner "`extract` [<--version>`=`] [<--force>] <formula> <tap>"
+      description <<~EOS
         Look through repository history to find the most recent version of <formula> and
-        create a copy in <tap>`/Formula/`<formula>`@`<version>`.rb`. If the tap is not
+        create a copy in <tap>. Specifically, the command will create the new
+        formula file at <tap>`/Formula/`<formula>`@`<version>`.rb`. If the tap is not
         installed yet, attempt to install/clone the tap before continuing. To extract
         a formula from a tap that is not `homebrew/core` use its fully-qualified form of
         <user>`/`<repo>`/`<formula>.
@@ -93,20 +97,20 @@ module Homebrew
       switch "-f", "--force",
              description: "Overwrite the destination formula if it already exists."
 
-      named 2
+      named_args [:formula, :tap], number: 2
     end
   end
 
   def extract
     args = extract_args.parse
 
-    if args.named.first !~ HOMEBREW_TAP_FORMULA_REGEX
+    if (match = args.named.first.match(HOMEBREW_TAP_FORMULA_REGEX))
+      name = match[3].downcase
+      source_tap = Tap.fetch(match[1], match[2])
+      raise TapFormulaUnavailableError.new(source_tap, name) unless source_tap.installed?
+    else
       name = args.named.first.downcase
       source_tap = CoreTap.instance
-    else
-      name = Regexp.last_match(3).downcase
-      source_tap = Tap.fetch(Regexp.last_match(1), Regexp.last_match(2))
-      raise TapFormulaUnavailableError.new(source_tap, name) unless source_tap.installed?
     end
 
     destination_tap = Tap.fetch(args.named.second)
@@ -198,7 +202,7 @@ module Homebrew
     # Remove bottle blocks, they won't work.
     result.sub!(/  bottle do.+?end\n\n/m, "") if destination_tap != source_tap
 
-    path = destination_tap.path/"Formula/#{name}@#{version}.rb"
+    path = destination_tap.path/"Formula/#{name}@#{version.to_s.downcase}.rb"
     if path.exist?
       unless args.force?
         odie <<~EOS
@@ -210,8 +214,8 @@ module Homebrew
       odebug "Overwriting existing formula at #{path}"
       path.delete
     end
-    ohai "Writing formula for #{name} from revision #{rev} to:"
-    puts path
+    ohai "Writing formula for #{name} from revision #{rev} to:", path
+    path.dirname.mkpath
     path.write result
   end
 

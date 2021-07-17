@@ -1,15 +1,24 @@
+# typed: true
 # frozen_string_literal: true
 
+require "utils/curl"
 require "utils/github"
 
 # Helper module for updating SPDX license data.
 #
 # @api private
 module SPDX
+  include Utils::Curl
+  extend Utils::Curl
+
   module_function
 
   DATA_PATH = (HOMEBREW_DATA_PATH/"spdx").freeze
   API_URL = "https://api.github.com/repos/spdx/license-list-data/releases/latest"
+  ALLOWED_LICENSE_SYMBOLS = [
+    :public_domain,
+    :cannot_represent,
+  ].freeze
 
   def license_data
     @license_data ||= JSON.parse (DATA_PATH/"spdx_licenses.json").read
@@ -20,18 +29,18 @@ module SPDX
   end
 
   def latest_tag
-    @latest_tag ||= GitHub.open_api(API_URL)["tag_name"]
+    @latest_tag ||= GitHub::API.open_rest(API_URL)["tag_name"]
   end
 
   def download_latest_license_data!(to: DATA_PATH)
     data_url = "https://raw.githubusercontent.com/spdx/license-list-data/#{latest_tag}/json/"
-    curl_download("#{data_url}licenses.json", to: to/"spdx_licenses.json", partial: false)
-    curl_download("#{data_url}exceptions.json", to: to/"spdx_exceptions.json", partial: false)
+    curl_download("#{data_url}licenses.json", to: to/"spdx_licenses.json", try_partial: false)
+    curl_download("#{data_url}exceptions.json", to: to/"spdx_exceptions.json", try_partial: false)
   end
 
   def parse_license_expression(license_expression)
-    licenses = []
-    exceptions = []
+    licenses = T.let([], T::Array[T.any(String, Symbol)])
+    exceptions = T.let([], T::Array[String])
 
     case license_expression
     when String, Symbol
@@ -59,16 +68,17 @@ module SPDX
   end
 
   def valid_license?(license)
-    return true if license == :public_domain
+    return ALLOWED_LICENSE_SYMBOLS.include? license if license.is_a? Symbol
 
     license = license.delete_suffix "+"
     license_data["licenses"].any? { |spdx_license| spdx_license["licenseId"] == license }
   end
 
   def deprecated_license?(license)
-    return false if license == :public_domain
+    return false if ALLOWED_LICENSE_SYMBOLS.include? license
     return false unless valid_license?(license)
 
+    license = license.delete_suffix "+"
     license_data["licenses"].none? do |spdx_license|
       spdx_license["licenseId"] == license && !spdx_license["isDeprecatedLicenseId"]
     end
@@ -84,8 +94,8 @@ module SPDX
     case license_expression
     when String
       license_expression
-    when :public_domain
-      "Public Domain"
+    when Symbol
+      license_expression.to_s.tr("_", " ").titleize
     when Hash
       expressions = []
 
@@ -101,7 +111,7 @@ module SPDX
       else
         bracket = false
         license_expression.each do |expression|
-          expressions.push license_expression_to_string(Hash[*expression], bracket: true)
+          expressions.push license_expression_to_string([expression].to_h, bracket: true)
         end
       end
 
@@ -120,7 +130,7 @@ module SPDX
   end
 
   def license_version_info(license)
-    return [license] if license == :public_domain
+    return [license] if ALLOWED_LICENSE_SYMBOLS.include? license
 
     match = license.match(/-(?<version>[0-9.]+)(?:-.*?)??(?<or_later>\+|-only|-or-later)?$/)
     return [license] if match.blank?

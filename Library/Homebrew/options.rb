@@ -1,9 +1,12 @@
+# typed: false
 # frozen_string_literal: true
 
 # A formula option.
 #
 # @api private
 class Option
+  extend T::Sig
+
   attr_reader :name, :description, :flag
 
   def initialize(name, description = "")
@@ -31,6 +34,7 @@ class Option
     name.hash
   end
 
+  sig { returns(String) }
   def inspect
     "#<#{self.class.name}: #{flag.inspect}>"
   end
@@ -40,6 +44,8 @@ end
 #
 # @api private
 class DeprecatedOption
+  extend T::Sig
+
   attr_reader :old, :current
 
   def initialize(old, current)
@@ -47,10 +53,12 @@ class DeprecatedOption
     @current = current
   end
 
+  sig { returns(String) }
   def old_flag
     "--#{old}"
   end
 
+  sig { returns(String) }
   def current_flag
     "--#{current}"
   end
@@ -65,10 +73,12 @@ end
 #
 # @api private
 class Options
+  extend T::Sig
+
   include Enumerable
 
   def self.create(array)
-    new array.map { |e| Option.new(e[/^--([^=]+=?)(.+)?$/, 1] || e) }
+    new Array(array).map { |e| Option.new(e[/^--([^=]+=?)(.+)?$/, 1] || e) }
   end
 
   def initialize(*args)
@@ -104,6 +114,12 @@ class Options
     @options.to_a * other
   end
 
+  def ==(other)
+    instance_of?(other.class) &&
+      to_a == other.to_a
+  end
+  alias eql? ==
+
   def empty?
     @options.empty?
   end
@@ -118,6 +134,7 @@ class Options
 
   alias to_ary to_a
 
+  sig { returns(String) }
   def inspect
     "#<#{self.class.name}: #{to_a.inspect}>"
   end
@@ -126,7 +143,6 @@ class Options
     f.options.sort_by(&:flag).each do |opt|
       puts "#{opt.flag}\n\t#{opt.description}"
     end
-    puts "--devel\n\tInstall development version #{f.devel.version}" if f.devel
     puts "--HEAD\n\tInstall HEAD version" if f.head
   end
 end

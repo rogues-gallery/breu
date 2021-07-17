@@ -1,3 +1,4 @@
+# typed: false
 # frozen_string_literal: true
 
 require "fetch"
@@ -5,15 +6,16 @@ require "cli/parser"
 require "cask/download"
 
 module Homebrew
+  extend T::Sig
+
   extend Fetch
 
   module_function
 
+  sig { returns(CLI::Parser) }
   def __cache_args
     Homebrew::CLI::Parser.new do
-      usage_banner <<~EOS
-        `--cache` [<options>] [<formula|cask>]
-
+      description <<~EOS
         Display Homebrew's download cache. See also `HOMEBREW_CACHE`.
 
         If <formula> is provided, display the file or directory used to cache <formula>.
@@ -26,11 +28,15 @@ module Homebrew
              description: "Only show cache files for formulae."
       switch "--cask",
              description: "Only show cache files for casks."
-      conflicts "--build-from-source", "--force-bottle"
+
+      conflicts "--build-from-source", "--force-bottle", "--cask"
       conflicts "--formula", "--cask"
+
+      named_args [:formula, :cask]
     end
   end
 
+  sig { void }
   def __cache
     args = __cache_args.parse
 
@@ -39,13 +45,7 @@ module Homebrew
       return
     end
 
-    formulae_or_casks = if args.formula?
-      args.named.to_formulae
-    elsif args.cask?
-      args.named.to_casks
-    else
-      args.named.to_formulae_and_casks
-    end
+    formulae_or_casks = args.named.to_formulae_and_casks
 
     formulae_or_casks.each do |formula_or_cask|
       if formula_or_cask.is_a? Formula
@@ -56,6 +56,7 @@ module Homebrew
     end
   end
 
+  sig { params(formula: Formula, args: CLI::Args).void }
   def print_formula_cache(formula, args:)
     if fetch_bottle?(formula, args: args)
       puts formula.bottle.cached_download
@@ -64,6 +65,7 @@ module Homebrew
     end
   end
 
+  sig { params(cask: Cask::Cask).void }
   def print_cask_cache(cask)
     puts Cask::Download.new(cask).downloader.cached_location
   end

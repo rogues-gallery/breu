@@ -1,3 +1,4 @@
+# typed: true
 # frozen_string_literal: true
 
 require "cask/artifact/abstract_artifact"
@@ -11,6 +12,8 @@ module Cask
     #
     # @api private
     class Relocated < AbstractArtifact
+      extend T::Sig
+
       def self.from_args(cask, *args)
         source_string, target_hash = args
 
@@ -25,12 +28,23 @@ module Cask
         new(cask, source_string, **target_hash)
       end
 
-      def resolve_target(target)
-        config.public_send(self.class.dirmethod).join(target)
+      def resolve_target(target, base_dir: config.public_send(self.class.dirmethod))
+        target = Pathname(target)
+
+        if target.relative?
+          return target.expand_path if target.descend.first.to_s == "~"
+          return base_dir/target if base_dir
+        end
+
+        target
       end
 
       attr_reader :source, :target
 
+      sig {
+        params(cask: Cask, source: T.nilable(T.any(String, Pathname)), target: T.nilable(T.any(String, Pathname)))
+          .void
+      }
       def initialize(cask, source, target: nil)
         super(cask)
 
@@ -48,6 +62,7 @@ module Cask
         end
       end
 
+      sig { returns(String) }
       def summarize
         target_string = @target_string.empty? ? "" : " -> #{@target_string}"
         "#{@source_string}#{target_string}"
@@ -67,7 +82,7 @@ module Cask
         altnames = command.run("/usr/bin/xattr",
                                args:         ["-p", ALT_NAME_ATTRIBUTE, file],
                                print_stderr: false).stdout.sub(/\A\((.*)\)\Z/, '\1')
-        odebug "Existing metadata is: '#{altnames}'"
+        odebug "Existing metadata is: #{altnames}"
         altnames.concat(", ") unless altnames.empty?
         altnames.concat(%Q("#{altname}"))
         altnames = "(#{altnames})"

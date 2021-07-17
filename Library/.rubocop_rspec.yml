@@ -1,17 +1,5 @@
 inherit_from: ./.rubocop.yml
 
-AllCops:
-  Include:
-    - '**/cmd/**/*.rb'
-    - '**/lib/**/*.rb'
-    - '**/spec/**/*.rb'
-  Exclude:
-    - '**/vendor/**/*'
-
-# allow style to be disabled in non-formulae code
-Style/DisableCopsWithinSourceCodeDirective:
-  Enabled: false
-
 # Intentionally disabled as it doesn't fit with our code style.
 RSpec/AnyInstance:
   Enabled: false
@@ -23,8 +11,6 @@ RSpec/SubjectStub:
   Enabled: false
 
 # TODO: try to enable these
-RSpec/ContextWording:
-  Enabled: false
 RSpec/DescribeClass:
   Enabled: false
 RSpec/LeakyConstantDeclaration:
@@ -33,7 +19,7 @@ RSpec/MessageSpies:
   Enabled: false
 RSpec/RepeatedDescription:
   Enabled: false
-RSpec/RepeatedExampleGroupDescription:
+RSpec/StubbedMock:
   Enabled: false
 
 # TODO: try to reduce these
@@ -45,3 +31,7 @@ RSpec/NestedGroups:
   Max: 5
 RSpec/MultipleMemoizedHelpers:
   Max: 12
+
+# Annoying to have these autoremoved.
+RSpec/Focus:
+  AutoCorrect: false

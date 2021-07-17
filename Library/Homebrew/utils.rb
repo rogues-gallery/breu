@@ -1,4 +1,7 @@
+# typed: false
 # frozen_string_literal: true
+
+require "time"
 
 require "utils/analytics"
 require "utils/curl"
@@ -6,16 +9,15 @@ require "utils/fork"
 require "utils/formatter"
 require "utils/gems"
 require "utils/git"
+require "utils/git_repository"
 require "utils/github"
 require "utils/inreplace"
 require "utils/link"
-require "utils/livecheck_formula"
 require "utils/popen"
 require "utils/repology"
 require "utils/svn"
 require "utils/tty"
 require "tap_constants"
-require "time"
 
 module Homebrew
   extend Context
@@ -33,7 +35,7 @@ module Homebrew
       end
       exit! 1 # never gets here unless exec failed
     end
-    Process.wait(pid)
+    Process.wait(T.must(pid))
     $CHILD_STATUS.success?
   end
 
@@ -57,10 +59,13 @@ module Homebrew
         method = instance_method(name)
         define_method(name) do |*args, &block|
           time = Time.now
-          method.bind(self).call(*args, &block)
-        ensure
-          $times[name] ||= 0
-          $times[name] += Time.now - time
+
+          begin
+            method.bind(self).call(*args, &block)
+          ensure
+            $times[name] ||= 0
+            $times[name] += Time.now - time
+          end
         end
       end
     end
@@ -79,6 +84,8 @@ module Homebrew
 end
 
 module Kernel
+  extend T::Sig
+
   def require?(path)
     return false if path.nil?
 
@@ -105,6 +112,24 @@ module Kernel
     puts sput
   end
 
+  def ohai_stdout_or_stderr(message, *sput)
+    if $stdout.tty?
+      ohai(message, *sput)
+    else
+      $stderr.puts(ohai_title(message))
+      $stderr.puts(sput)
+    end
+  end
+
+  def puts_stdout_or_stderr(*message)
+    message = "\n" if message.empty?
+    if $stdout.tty?
+      puts(message)
+    else
+      $stderr.puts(message)
+    end
+  end
+
   def odebug(title, *sput, always_display: false)
     debug = if respond_to?(:debug)
       debug?
@@ -112,7 +137,7 @@ module Kernel
       Context.current.debug?
     end
 
-    return unless debug || always_display
+    return if !debug && !always_display
 
     puts Formatter.headline(title, color: :magenta)
     puts sput unless sput.empty?
@@ -129,13 +154,18 @@ module Kernel
     puts Formatter.headline(title, color: :green)
   end
 
-  # Print a warning (do this rarely)
+  # Print a message prefixed with "Warning" (do this rarely).
   def opoo(message)
-    $stderr.puts Formatter.warning(message, label: "Warning")
+    Tty.with($stderr) do |stderr|
+      stderr.puts Formatter.warning(message, label: "Warning")
+    end
   end
 
+  # Print a message prefixed with "Error".
   def onoe(message)
-    $stderr.puts Formatter.error(message, label: "Error")
+    Tty.with($stderr) do |stderr|
+      stderr.puts Formatter.error(message, label: "Error")
+    end
   end
 
   def ofail(error)
@@ -177,15 +207,24 @@ module Kernel
 
     # Don't throw deprecations at all for cached, .brew or .metadata files.
     return if backtrace.any? do |line|
-      line.include?(HOMEBREW_CACHE) ||
-      line.include?("/.brew/") ||
-      line.include?("/.metadata/")
+      next true if line.include?(HOMEBREW_CACHE.to_s)
+      next true if line.include?("/.brew/")
+      next true if line.include?("/.metadata/")
+
+      next false unless line.match?(HOMEBREW_TAP_PATH_REGEX)
+
+      path = Pathname(line.split(":", 2).first)
+      next false unless path.file?
+      next false unless path.readable?
+
+      formula_contents = path.read
+      formula_contents.include?(" deprecate! ") || formula_contents.include?(" disable! ")
     end
 
-    tap_message = nil
+    tap_message = T.let(nil, T.nilable(String))
 
     backtrace.each do |line|
-      next unless match = line.match(HOMEBREW_TAP_PATH_REGEX)
+      next unless (match = line.match(HOMEBREW_TAP_PATH_REGEX))
 
       tap = Tap.fetch(match[:user], match[:repo])
       tap_message = +"\nPlease report this issue to the #{tap} tap (not Homebrew/brew or Homebrew/core)"
@@ -255,12 +294,12 @@ module Kernel
       ENV["HOMEBREW_DEBUG_INSTALL"] = f.full_name
     end
 
-    if ENV["SHELL"].include?("zsh") && ENV["HOME"].start_with?(HOMEBREW_TEMP.resolved_path.to_s)
-      FileUtils.mkdir_p ENV["HOME"]
-      FileUtils.touch "#{ENV["HOME"]}/.zshrc"
+    if ENV["SHELL"].include?("zsh") && (home = ENV["HOME"])&.start_with?(HOMEBREW_TEMP.resolved_path.to_s)
+      FileUtils.mkdir_p home
+      FileUtils.touch "#{home}/.zshrc"
     end
 
-    Process.wait fork { exec ENV["SHELL"] }
+    Process.wait fork { exec ENV.fetch("SHELL") }
 
     return if $CHILD_STATUS.success?
     raise "Aborted due to non-zero exit status (#{$CHILD_STATUS.exitstatus})" if $CHILD_STATUS.exited?
@@ -276,14 +315,14 @@ module Kernel
     with_env(LC_ALL: locale, &block)
   end
 
-  # Kernel.system but with exceptions
+  # Kernel.system but with exceptions.
   def safe_system(cmd, *args, **options)
     return if Homebrew.system(cmd, *args, **options)
 
     raise ErrorDuringExecution.new([cmd, *args], status: $CHILD_STATUS)
   end
 
-  # Prints no output
+  # Prints no output.
   def quiet_system(cmd, *args)
     Homebrew._system(cmd, *args) do
       # Redirect output streams to `/dev/null` instead of closing as some programs
@@ -354,7 +393,7 @@ module Kernel
     safe_system(browser, *args)
   end
 
-  # GZips the given paths, and returns the gzipped paths
+  # GZips the given paths, and returns the gzipped paths.
   def gzip(*paths)
     paths.map do |path|
       safe_system "gzip", path
@@ -362,21 +401,33 @@ module Kernel
     end
   end
 
-  # Returns array of architectures that the given command or library is built for.
-  def archs_for_command(cmd)
-    cmd = which(cmd) unless Pathname.new(cmd).absolute?
-    Pathname.new(cmd).archs
-  end
+  def ignore_interrupts(_opt = nil)
+    # rubocop:disable Style/GlobalVars
+    $ignore_interrupts_nesting_level = 0 unless defined?($ignore_interrupts_nesting_level)
+    $ignore_interrupts_nesting_level += 1
 
-  def ignore_interrupts(opt = nil)
-    std_trap = trap("INT") do
-      puts "One sec, just cleaning up" unless opt == :quietly
+    $ignore_interrupts_interrupted = false unless defined?($ignore_interrupts_interrupted)
+    old_sigint_handler = trap(:INT) do
+      $ignore_interrupts_interrupted = true
+      $stderr.print "\n"
+      $stderr.puts "One sec, cleaning up..."
     end
-    yield
-  ensure
-    trap("INT", std_trap)
+
+    begin
+      yield
+    ensure
+      trap(:INT, old_sigint_handler)
+
+      $ignore_interrupts_nesting_level -= 1
+      if $ignore_interrupts_nesting_level == 0 && $ignore_interrupts_interrupted
+        $ignore_interrupts_interrupted = false
+        raise Interrupt
+      end
+    end
+    # rubocop:enable Style/GlobalVars
   end
 
+  sig { returns(String) }
   def capture_stderr
     old = $stderr
     $stderr = StringIO.new
@@ -407,6 +458,13 @@ module Kernel
     rescue ArgumentError
       onoe "The following PATH component is invalid: #{p}"
     end.uniq.compact
+  end
+
+  def parse_author!(author)
+    /^(?<name>[^<]+?)[ \t]*<(?<email>[^>]+?)>$/ =~ author
+    raise UsageError, "Unable to parse name and email." if name.blank? && email.blank?
+
+    { name: name, email: email }
   end
 
   def disk_usage_readable(size_in_bytes)
@@ -472,14 +530,14 @@ module Kernel
 
   # Calls the given block with the passed environment variables
   # added to ENV, then restores ENV afterwards.
-  # Example:
   # <pre>with_env(PATH: "/bin") do
   #   system "echo $PATH"
   # end</pre>
   #
-  # Note that this method is *not* thread-safe - other threads
-  # which happen to be scheduled during the block will also
-  # see these environment variables.
+  # @note This method is *not* thread-safe - other threads
+  #   which happen to be scheduled during the block will also
+  #   see these environment variables.
+  # @api public
   def with_env(hash)
     old_values = {}
     begin
@@ -495,15 +553,16 @@ module Kernel
     end
   end
 
+  sig { returns(String) }
   def shell_profile
     Utils::Shell.profile
   end
 
   def tap_and_name_comparison
     proc do |a, b|
-      if a.include?("/") && !b.include?("/")
+      if a.include?("/") && b.exclude?("/")
         1
-      elsif !a.include?("/") && b.include?("/")
+      elsif a.exclude?("/") && b.include?("/")
         -1
       else
         a <=> b

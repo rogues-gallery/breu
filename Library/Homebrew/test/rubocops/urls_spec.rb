@@ -1,3 +1,4 @@
+# typed: false
 # frozen_string_literal: true
 
 require "rubocops/urls"
@@ -5,7 +6,7 @@ require "rubocops/urls"
 describe RuboCop::Cop::FormulaAudit::Urls do
   subject(:cop) { described_class.new }
 
-  let(:formulae) {
+  let(:offense_list) {
     [{
       "url" => "https://ftpmirror.gnu.org/lightning/lightning-2.1.0.tar.gz",
       "msg" => 'Please use "https://ftp.gnu.org/gnu/lightning/lightning-2.1.0.tar.gz" instead of https://ftpmirror.gnu.org/lightning/lightning-2.1.0.tar.gz.',
@@ -182,26 +183,26 @@ describe RuboCop::Cop::FormulaAudit::Urls do
     }]
   }
 
-  context "When auditing urls" do
-    it "with offenses" do
-      formulae.each do |formula|
+  context "when auditing URLs" do
+    it "reports all offenses in `offense_list`" do
+      offense_list.each do |offense_info|
         allow_any_instance_of(RuboCop::Cop::FormulaCop).to receive(:formula_tap)
-                                                       .and_return(formula["formula_tap"])
+                                                       .and_return(offense_info["formula_tap"])
         source = <<~RUBY
           class Foo < Formula
             desc "foo"
-            url "#{formula["url"]}"
+            url "#{offense_info["url"]}"
           end
         RUBY
-        expected_offenses = [{ message:  formula["msg"],
+        expected_offenses = [{ message:  offense_info["msg"],
                                severity: :convention,
                                line:     3,
-                               column:   formula["col"],
+                               column:   offense_info["col"],
                                source:   source }]
 
-        inspect_source(source)
+        offenses = inspect_source(source)
 
-        expected_offenses.zip(cop.offenses.reverse).each do |expected, actual|
+        expected_offenses.zip(offenses.reverse).each do |expected, actual|
           expect(actual.message).to eq(expected[:message])
           expect(actual.severity).to eq(expected[:severity])
           expect(actual.line).to eq(expected[:line])
@@ -210,67 +211,30 @@ describe RuboCop::Cop::FormulaAudit::Urls do
       end
     end
 
-    it "with offenses in stable/devel/head block" do
+    it "reports an offense for GitHub repositories with git:// prefix" do
       expect_offense(<<~RUBY)
         class Foo < Formula
           desc "foo"
           url "https://foo.com"
 
-          devel do
+          stable do
             url "git://github.com/foo.git",
             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ Please use https:// for git://github.com/foo.git
-                :tag => "v1.0.0-alpha.1",
+                :tag => "v1.0.1",
                 :revision => "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-            version "1.0.0-alpha.1"
+            version "1.0.1"
           end
         end
       RUBY
     end
 
-    it "with duplicate mirror" do
+    it "reports an offense if `url` is the same as `mirror`" do
       expect_offense(<<~RUBY)
         class Foo < Formula
           desc "foo"
           url "https://ftpmirror.fnu.org/foo/foo-1.0.tar.gz"
           mirror "https://ftpmirror.fnu.org/foo/foo-1.0.tar.gz"
           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ URL should not be duplicated as a mirror: https://ftpmirror.fnu.org/foo/foo-1.0.tar.gz
-        end
-      RUBY
-    end
-  end
-
-  include_examples "formulae exist", described_class::BINARY_BOOTSTRAP_FORMULA_URLS_ALLOWLIST
-end
-
-describe RuboCop::Cop::FormulaAudit::PyPiUrls do
-  subject(:cop) { described_class.new }
-
-  context "when a pypi URL is used" do
-    it "reports an offense for pypi.python.org urls" do
-      expect_offense(<<~RUBY)
-        class Foo < Formula
-          desc "foo"
-          url "https://pypi.python.org/packages/source/foo/foo-0.1.tar.gz"
-          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ use the `Source` url found on PyPI downloads page (`https://pypi.org/project/foo/#files`)
-        end
-      RUBY
-    end
-
-    it "reports an offense for short file.pythonhosted.org urls" do
-      expect_offense(<<~RUBY)
-        class Foo < Formula
-          desc "foo"
-          url "https://files.pythonhosted.org/packages/source/f/foo/foo-0.1.tar.gz"
-          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ use the `Source` url found on PyPI downloads page (`https://pypi.org/project/foo/#files`)
-        end
-      RUBY
-    end
-
-    it "reports no offenses for long file.pythonhosted.org urls" do
-      expect_no_offenses(<<~RUBY)
-        class Foo < Formula
-          desc "foo"
-          url "https://files.pythonhosted.org/packages/a0/b1/a01b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f/foo-0.1.tar.gz"
         end
       RUBY
     end

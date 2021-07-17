@@ -1,7 +1,7 @@
+# typed: false
 # frozen_string_literal: true
 
 require "macho"
-require "os/mac/architecture_list"
 
 # {Pathname} extension for dealing with Mach-O files.
 #
@@ -9,12 +9,10 @@ require "os/mac/architecture_list"
 module MachOShim
   extend Forwardable
 
-  delegate [:dylib_id, :rpaths, :delete_rpath] => :macho
+  delegate [:dylib_id, :rpaths] => :macho
 
   def macho
-    @macho ||= begin
-      MachO.open(to_s)
-    end
+    @macho ||= MachO.open(to_s)
   end
   private :macho
 
@@ -66,7 +64,7 @@ module MachOShim
   end
 
   def archs
-    mach_data.map { |m| m.fetch :arch }.extend(ArchitectureListExtension)
+    mach_data.map { |m| m.fetch :arch }
   end
 
   def arch

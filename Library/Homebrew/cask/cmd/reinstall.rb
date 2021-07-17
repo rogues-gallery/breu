@@ -1,15 +1,15 @@
+# typed: true
 # frozen_string_literal: true
 
 module Cask
   class Cmd
-    # Implementation of the `brew cask reinstall` command.
+    # Cask implementation of the `brew reinstall` command.
     #
     # @api private
     class Reinstall < Install
-      def self.description
-        "Reinstalls the given <cask>."
-      end
+      extend T::Sig
 
+      sig { void }
       def run
         self.class.reinstall_casks(
           *casks,
@@ -24,9 +24,9 @@ module Cask
 
       def self.reinstall_casks(
         *casks,
-        verbose: false,
-        force: false,
-        skip_cask_deps: false,
+        verbose: nil,
+        force: nil,
+        skip_cask_deps: nil,
         binaries: nil,
         require_sha: nil,
         quarantine: nil

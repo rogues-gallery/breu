@@ -1,3 +1,4 @@
+# typed: false
 # frozen_string_literal: true
 
 # `brew uses foo bar` returns formulae that use both foo and bar
@@ -10,24 +11,25 @@ require "cask/caskroom"
 require "dependencies_helpers"
 
 module Homebrew
+  extend T::Sig
+
   extend DependenciesHelpers
 
   module_function
 
+  sig { returns(CLI::Parser) }
   def uses_args
     Homebrew::CLI::Parser.new do
-      usage_banner <<~EOS
-        `uses` [<options>] <formula>
-
-        Show formulae that specify <formula> as a dependency (i.e. show dependents
-        of <formula>). When given multiple formula arguments, show the intersection
-        of formulae that use <formula>. By default, `uses` shows all formulae that
+      description <<~EOS
+        Show formulae and casks that specify <formula> as a dependency; that is, show dependents
+        of <formula>. When given multiple formula arguments, show the intersection
+        of formulae that use <formula>. By default, `uses` shows all formulae and casks that
         specify <formula> as a required or recommended dependency for their stable builds.
       EOS
       switch "--recursive",
              description: "Resolve more than one level of dependencies."
       switch "--installed",
-             description: "Only list formulae that are currently installed."
+             description: "Only list formulae and casks that are currently installed."
       switch "--include-build",
              description: "Include all formulae that specify <formula> as `:build` type dependency."
       switch "--include-test",
@@ -36,21 +38,19 @@ module Homebrew
              description: "Include all formulae that specify <formula> as `:optional` type dependency."
       switch "--skip-recommended",
              description: "Skip all formulae that specify <formula> as `:recommended` type dependency."
-      switch "--devel",
-             description: "Show usage of <formula> by development builds."
-      switch "--HEAD",
-             description: "Show usage of <formula> by HEAD builds."
+      switch "--formula", "--formulae",
+             description: "Include only formulae."
+      switch "--cask", "--casks",
+             description: "Include only casks."
 
-      conflicts "--devel", "--HEAD"
-      min_named :formula
+      conflicts "--formula", "--cask"
+
+      named_args :formula, min: 1
     end
   end
 
   def uses
     args = uses_args.parse
-
-    odeprecated "brew uses --devel" if args.devel?
-    odeprecated "brew uses --HEAD" if args.HEAD?
 
     Formulary.enable_factory_cache!
 
@@ -81,21 +81,33 @@ module Homebrew
 
   def intersection_of_dependents(use_runtime_dependents, used_formulae, args:)
     recursive = args.recursive?
+    show_formulae_and_casks = !args.formula? && !args.cask?
     includes, ignores = args_includes_ignores(args)
 
+    deps = []
     if use_runtime_dependents
-      used_formulae.map(&:runtime_installed_formula_dependents)
-                   .reduce(&:&)
-                   .select(&:any_version_installed?) +
-        select_used_dependents(dependents(Cask::Caskroom.casks), used_formulae, recursive, includes, ignores)
-    else
-      deps = if args.installed?
-        dependents(Formula.installed + Cask::Caskroom.casks)
-      else
-        dependents(Formula.to_a + Cask::Cask.to_a)
+      if show_formulae_and_casks || args.formula?
+        deps += used_formulae.map(&:runtime_installed_formula_dependents)
+                             .reduce(&:&)
+                             .select(&:any_version_installed?)
+      end
+      if show_formulae_and_casks || args.cask?
+        deps += select_used_dependents(
+          dependents(Cask::Caskroom.casks),
+          used_formulae, recursive, includes, ignores
+        )
       end
 
-      select_used_dependents(deps, used_formulae, recursive, includes, ignores)
+      deps
+    else
+      if show_formulae_and_casks || args.formula?
+        deps += args.installed? ? Formula.installed : Formula.to_a
+      end
+      if show_formulae_and_casks || args.cask?
+        deps += args.installed? ? Cask::Caskroom.casks : Cask::Cask.to_a
+      end
+
+      select_used_dependents(dependents(deps), used_formulae, recursive, includes, ignores)
     end
   end
 

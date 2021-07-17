@@ -1,3 +1,4 @@
+# typed: true
 # frozen_string_literal: true
 
 # Options for a formula build.
@@ -8,13 +9,6 @@ class BuildOptions
   def initialize(args, options)
     @args = args
     @options = options
-  end
-
-  # True if a {Formula} is being built with a specific option
-  # (which isn't named `with-*` or `without-*`).
-  # @deprecated
-  def include?(name)
-    @args.include?("--#{name}")
   end
 
   # True if a {Formula} is being built with a specific option.
@@ -35,7 +29,7 @@ class BuildOptions
       if option_defined? "with-#{name}"
         include? "with-#{name}"
       elsif option_defined? "without-#{name}"
-        !include? "without-#{name}"
+        !include? "without-#{name}" # rubocop:disable Rails/NegateInclude
       else
         false
       end
@@ -56,37 +50,19 @@ class BuildOptions
   # True if a {Formula} is being built with {Formula.head} instead of {Formula.stable}.
   # <pre>args << "--some-new-stuff" if build.head?</pre>
   # <pre># If there are multiple conditional arguments use a block instead of lines.
-  #  if build.head?
-  #    args << "--i-want-pizza"
-  #    args << "--and-a-cold-beer" if build.with? "cold-beer"
-  #  end</pre>
+  # if build.head?
+  #   args << "--i-want-pizza"
+  #   args << "--and-a-cold-beer" if build.with? "cold-beer"
+  # end</pre>
   def head?
     include? "HEAD"
   end
 
-  # True if a {Formula} is being built with {Formula.devel} instead of {Formula.stable}.
-  # <pre>args << "--some-beta" if build.devel?</pre>
-  def devel?
-    include? "devel"
-  end
-
-  # True if a {Formula} is being built with {Formula.stable} instead of {Formula.devel}
-  # or {Formula.head}. This is the default.
-  # <pre>args << "--some-beta" if build.devel?</pre>
+  # True if a {Formula} is being built with {Formula.stable} instead of {Formula.head}.
+  # This is the default.
+  # <pre>args << "--some-beta" if build.head?</pre>
   def stable?
-    !(head? || devel?)
-  end
-
-  # True if a {Formula} is being built universally.
-  # e.g. on newer Intel Macs this means a combined x86_64/x86 binary/library.
-  # <pre>args << "--universal-binary" if build.universal?</pre>
-  def universal?
-    include?("universal") && option_defined?("universal")
-  end
-
-  # True if a {Formula} is being built in C++11 mode.
-  def cxx11?
-    include?("c++11") && option_defined?("c++11")
+    !head?
   end
 
   # True if the build has any arguments or options specified.
@@ -105,6 +81,10 @@ class BuildOptions
   end
 
   private
+
+  def include?(name)
+    @args.include?("--#{name}")
+  end
 
   def option_defined?(name)
     @options.include? name

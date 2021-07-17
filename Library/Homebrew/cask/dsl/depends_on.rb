@@ -1,4 +1,7 @@
+# typed: false
 # frozen_string_literal: true
+
+require "delegate"
 
 require "requirements/macos_requirement"
 
@@ -7,24 +10,22 @@ module Cask
     # Class corresponding to the `depends_on` stanza.
     #
     # @api private
-    class DependsOn < DelegateClass(Hash)
+    class DependsOn < SimpleDelegator
       VALID_KEYS = Set.new([
-                             :formula,
-                             :cask,
-                             :macos,
-                             :arch,
-                             :x11,
-                             :java,
-                           ]).freeze
+        :formula,
+        :cask,
+        :macos,
+        :arch,
+      ]).freeze
 
       VALID_ARCHES = {
         intel:  { type: :intel, bits: 64 },
         # specific
         x86_64: { type: :intel, bits: 64 },
+        arm64:  { type: :arm, bits: 64 },
       }.freeze
 
-      attr_accessor :java
-      attr_reader :arch, :cask, :formula, :macos, :x11
+      attr_reader :arch, :cask, :formula, :macos
 
       def initialize
         super({})
@@ -49,7 +50,7 @@ module Cask
       end
 
       def macos=(*args)
-        raise "Only a single 'depends_on macos:' is allowed." if defined?(@macos)
+        raise "Only a single 'depends_on macos' is allowed." if defined?(@macos)
 
         begin
           @macos = if args.count > 1
@@ -60,11 +61,11 @@ module Cask
             MacOSRequirement.new([version.to_sym], comparator: comparator)
           elsif /^\s*(?<comparator><|>|[=<>]=)\s*(?<version>\S+)\s*$/ =~ args.first
             MacOSRequirement.new([version], comparator: comparator)
-          else
+          else # rubocop:disable Lint/DuplicateBranch
             MacOSRequirement.new([args.first], comparator: "==")
           end
-        rescue MacOSVersionError
-          raise "invalid 'depends_on macos' value: #{args.first.inspect}"
+        rescue MacOSVersionError => e
+          raise "invalid 'depends_on macos' value: #{e}"
         end
       end
 
@@ -77,12 +78,6 @@ module Cask
         raise "invalid 'depends_on arch' values: #{invalid_arches.inspect}" unless invalid_arches.empty?
 
         @arch.concat(arches.map { |arch| VALID_ARCHES[arch] })
-      end
-
-      def x11=(arg)
-        raise "invalid 'depends_on x11' value: #{arg.inspect}" unless [true, false].include?(arg)
-
-        @x11 = arg
       end
     end
   end

@@ -1,15 +1,18 @@
+# typed: true
 # frozen_string_literal: true
 
 require "cli/parser"
 
 module Homebrew
+  extend T::Sig
+
   module_function
 
+  sig { returns(CLI::Parser) }
   def tap_args
     Homebrew::CLI::Parser.new do
-      usage_banner <<~EOS
-        `tap` [<options>] [<user>`/`<repo>] [<URL>]
-
+      usage_banner "`tap` [<options>] [<user>`/`<repo>] [<URL>]"
+      description <<~EOS
         Tap a formula repository.
 
         If no arguments are provided, list all installed taps.
@@ -26,7 +29,7 @@ module Homebrew
       EOS
       switch "--full",
              description: "Convert a shallow clone to a full clone without untapping. Taps are only cloned as "\
-                          "shallow clones on continuous integration, or if `--shallow` was originally passed."
+                          "shallow clones if `--shallow` was originally passed."
       switch "--shallow",
              description: "Fetch tap as a shallow clone rather than a full clone. Useful for continuous integration."
       switch "--force-auto-update",
@@ -37,34 +40,31 @@ module Homebrew
       switch "--list-pinned",
              description: "List all pinned taps."
 
-      max_named 2
+      named_args :tap, max: 2
     end
   end
 
+  sig { void }
   def tap
     args = tap_args.parse
 
     if args.repair?
       Tap.each(&:link_completions_and_manpages)
+      Tap.each(&:fix_remote_configuration)
     elsif args.list_pinned?
       puts Tap.select(&:pinned?).map(&:name)
     elsif args.no_named?
       puts Tap.names
     else
-      full_clone = if args.full?
-        true
-      elsif !args.shallow?
-        ENV["CI"].blank?
-      else
-        !args.shallow?
-      end
-      odebug "Tapping as #{full_clone ? "full" : "shallow"} clone"
+      odeprecated "`brew tap --full`" if args.full?
+
+      odeprecated "`brew tap --shallow`" if args.shallow?
+
       tap = Tap.fetch(args.named.first)
       begin
         tap.install clone_target:      args.named.second,
                     force_auto_update: force_auto_update?(args: args),
-                    quiet:             args.quiet?,
-                    full_clone:        full_clone
+                    quiet:             args.quiet?
       rescue TapRemoteMismatchError => e
         odie e
       rescue TapAlreadyTappedError

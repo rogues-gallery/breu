@@ -1,3 +1,4 @@
+# typed: true
 # frozen_string_literal: true
 
 require "cache_store"
@@ -5,13 +6,14 @@ require "linkage_checker"
 require "cli/parser"
 
 module Homebrew
+  extend T::Sig
+
   module_function
 
+  sig { returns(CLI::Parser) }
   def linkage_args
     Homebrew::CLI::Parser.new do
-      usage_banner <<~EOS
-        `linkage` [<options>] [<formula>]
-
+      description <<~EOS
         Check the library links from the given <formula> kegs. If no <formula> are
         provided, check all kegs. Raises an error if run on uninstalled formulae.
       EOS
@@ -24,6 +26,8 @@ module Homebrew
       switch "--cached",
              description: "Print the cached linkage values stored in `HOMEBREW_CACHE`, set by a previous "\
                           "`brew linkage` run."
+
+      named_args :installed_formula
     end
   end
 
@@ -31,10 +35,10 @@ module Homebrew
     args = linkage_args.parse
 
     CacheStoreDatabase.use(:linkage) do |db|
-      kegs = if args.named.to_kegs.empty?
-        Formula.installed.map(&:opt_or_installed_prefix_keg).reject(&:nil?)
+      kegs = if args.named.to_default_kegs.empty?
+        Formula.installed.map(&:any_installed_keg).reject(&:nil?)
       else
-        args.named.to_kegs
+        args.named.to_default_kegs
       end
       kegs.each do |keg|
         ohai "Checking #{keg.name} linkage" if kegs.size > 1

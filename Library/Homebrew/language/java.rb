@@ -1,3 +1,4 @@
+# typed: true
 # frozen_string_literal: true
 
 module Language
@@ -14,7 +15,7 @@ module Language
         next false unless f.any_version_installed?
 
         unless version.zero?
-          major = f.opt_or_installed_prefix_keg.version.major
+          major = f.any_installed_version.major
           next false if major < version
           next false if major > version && !can_be_newer
         end
@@ -27,13 +28,7 @@ module Language
     private_class_method :find_openjdk_formula
 
     def self.java_home(version = nil)
-      f = find_openjdk_formula(version)
-      return f.opt_libexec if f
-
-      req = JavaRequirement.new Array(version)
-      raise UnsatisfiedRequirements, req.message unless req.satisfied?
-
-      req.java_home
+      find_openjdk_formula(version)&.opt_libexec
     end
 
     def self.java_home_shell(version = nil)

@@ -1,3 +1,4 @@
+# typed: false
 # frozen_string_literal: true
 
 require "utils/shell"
@@ -18,7 +19,7 @@ module FormulaCellarChecks
     return if ORIGINAL_PATHS.include? prefix_bin
 
     <<~EOS
-      #{prefix_bin} is not in your PATH
+      "#{prefix_bin}" is not in your PATH.
       You can amend this by altering your #{Utils::Shell.profile} file.
     EOS
   end
@@ -28,9 +29,9 @@ module FormulaCellarChecks
     return unless (formula.prefix/"man").directory?
 
     <<~EOS
-      A top-level "man" directory was found
-      Homebrew requires that man pages live under share.
-      This can often be fixed by passing "--mandir=\#{man}" to configure.
+      A top-level "man" directory was found.
+      Homebrew requires that man pages live under "share".
+      This can often be fixed by passing `--mandir=\#{man}` to `configure`.
     EOS
   end
 
@@ -39,9 +40,9 @@ module FormulaCellarChecks
     return unless (formula.prefix/"info").directory?
 
     <<~EOS
-      A top-level "info" directory was found
-      Homebrew suggests that info pages live under share.
-      This can often be fixed by passing "--infodir=\#{info}" to configure.
+      A top-level "info" directory was found.
+      Homebrew suggests that info pages live under "share".
+      This can often be fixed by passing `--infodir=\#{info}` to `configure`.
     EOS
   end
 
@@ -52,11 +53,11 @@ module FormulaCellarChecks
     return if jars.empty?
 
     <<~EOS
-      JARs were installed to "#{formula.lib}"
+      JARs were installed to "#{formula.lib}".
       Installing JARs to "lib" can cause conflicts between packages.
       For Java software, it is typically better for the formula to
       install to "libexec" and then symlink or wrap binaries into "bin".
-      See "activemq", "jruby", etc. for examples.
+      See formulae 'activemq', 'jruby', etc. for examples.
       The offending files are:
         #{jars * "\n        "}
     EOS
@@ -80,7 +81,7 @@ module FormulaCellarChecks
     return if non_libraries.empty?
 
     <<~EOS
-      Non-libraries were installed to "#{formula.lib}"
+      Non-libraries were installed to "#{formula.lib}".
       Installing non-libraries to "lib" is discouraged.
       The offending files are:
         #{non_libraries * "\n        "}
@@ -94,7 +95,7 @@ module FormulaCellarChecks
     return if non_exes.empty?
 
     <<~EOS
-      Non-executables were installed to "#{bin}"
+      Non-executables were installed to "#{bin}".
       The offending files are:
         #{non_exes * "\n  "}
     EOS
@@ -108,11 +109,10 @@ module FormulaCellarChecks
     return if generics.empty?
 
     <<~EOS
-      Generic binaries were installed to "#{bin}"
-      Binaries with generic names are likely to conflict with other software,
-      and suggest that this software should be installed to "libexec" and then
+      Generic binaries were installed to "#{bin}".
+      Binaries with generic names are likely to conflict with other software.
+      Homebrew suggests that this software is installed to "libexec" and then
       symlinked as needed.
-
       The offending files are:
         #{generics * "\n        "}
     EOS
@@ -123,9 +123,9 @@ module FormulaCellarChecks
     return if pth_found.empty?
 
     <<~EOS
-      easy-install.pth files were found
-      These .pth files are likely to cause link conflicts. Please invoke
-      setup.py using Language::Python.setup_install_args.
+      'easy-install.pth' files were found.
+      These '.pth' files are likely to cause link conflicts.
+      Please invoke `setup.py` using 'Language::Python.setup_install_args'.
       The offending files are:
         #{pth_found * "\n        "}
     EOS
@@ -143,7 +143,7 @@ module FormulaCellarChecks
     return unless bad_dir_name
 
     <<~EOS
-      Emacs Lisp files were installed into the wrong site-lisp subdirectory.
+      Emacs Lisp files were installed into the wrong "site-lisp" subdirectory.
       They should be installed into:
         #{share}/emacs/site-lisp/#{name}
     EOS
@@ -154,15 +154,16 @@ module FormulaCellarChecks
     # Emacs itself can do what it wants
     return if name == "emacs"
 
-    elisps = (share/"emacs/site-lisp").children.select { |file| %w[.el .elc].include? file.extname }
+    elisps = (share/"emacs/site-lisp").children.select do |file|
+      Keg::ELISP_EXTENSIONS.include? file.extname
+    end
     return if elisps.empty?
 
     <<~EOS
-      Emacs Lisp files were linked directly to #{HOMEBREW_PREFIX}/share/emacs/site-lisp
+      Emacs Lisp files were linked directly to "#{HOMEBREW_PREFIX}/share/emacs/site-lisp".
       This may cause conflicts with other packages.
       They should instead be installed into:
         #{share}/emacs/site-lisp/#{name}
-
       The offending files are:
         #{elisps * "\n        "}
     EOS
@@ -248,7 +249,7 @@ module FormulaCellarChecks
     Dir.chdir("/") do
       unless File.exist?(program_location)
         return <<~EOS
-          The plist #{key} does not exist:
+          The plist "#{key}" does not exist:
             #{program_location}
         EOS
       end
@@ -257,9 +258,60 @@ module FormulaCellarChecks
     end
 
     <<~EOS
-      The plist #{key} is not executable:
+      The plist "#{key}" is not executable:
         #{program_location}
     EOS
+  end
+
+  def check_python_symlinks(name, keg_only)
+    return unless keg_only
+    return unless name.start_with? "python"
+
+    return if %w[pip3 wheel3].none? do |l|
+      link = HOMEBREW_PREFIX/"bin"/l
+      link.exist? && File.realpath(link).start_with?(HOMEBREW_CELLAR/name)
+    end
+
+    "Python formulae that are keg-only should not create `pip3` and `wheel3` symlinks."
+  end
+
+  def check_service_command(formula)
+    return unless formula.prefix.directory?
+    return unless formula.service?
+
+    return "Service command blank" if formula.service.command.blank?
+
+    "Service command does not exist" unless File.exist?(formula.service.command.first)
+  end
+
+  def check_cpuid_instruction(formula)
+    return unless formula.prefix.directory?
+    # TODO: add methods to `utils/ast` to allow checking for method use
+    return unless formula.path.read.include? "ENV.runtime_cpu_detection"
+    # Checking for `cpuid` only makes sense on Intel:
+    # https://en.wikipedia.org/wiki/CPUID
+    return unless Hardware::CPU.intel?
+
+    # macOS `objdump` is a bit slow, so we prioritise llvm's `llvm-objdump` (~5.7x faster)
+    # or binutils' `objdump` (~1.8x faster) if they are installed.
+    objdump   = Formula["llvm"].opt_bin/"llvm-objdump" if Formula["llvm"].any_version_installed?
+    objdump ||= Formula["binutils"].opt_bin/"objdump" if Formula["binutils"].any_version_installed?
+    objdump ||= which("objdump")
+    objdump ||= which("objdump", ENV["HOMEBREW_PATH"])
+
+    unless objdump
+      return <<~EOS
+        No `objdump` found, so cannot check for a `cpuid` instruction. Install `objdump` with
+          brew install binutils
+      EOS
+    end
+
+    keg = Keg.new(formula.prefix)
+    return if keg.binary_executable_or_library_files.any? do |file|
+      cpuid_instruction?(file, objdump)
+    end
+
+    "No `cpuid` instruction detected. #{formula} should not use `ENV.runtime_cpu_detection`."
   end
 
   def audit_installed
@@ -268,6 +320,7 @@ module FormulaCellarChecks
     problem_if_output(check_manpages)
     problem_if_output(check_infopages)
     problem_if_output(check_jars)
+    problem_if_output(check_service_command(formula))
     problem_if_output(check_non_libraries) if @new_formula
     problem_if_output(check_non_executables(formula.bin))
     problem_if_output(check_generic_executables(formula.bin))
@@ -279,6 +332,8 @@ module FormulaCellarChecks
     problem_if_output(check_python_packages(formula.lib, formula.deps))
     problem_if_output(check_shim_references(formula.prefix))
     problem_if_output(check_plist(formula.prefix, formula.plist))
+    problem_if_output(check_python_symlinks(formula.name, formula.keg_only?))
+    problem_if_output(check_cpuid_instruction(formula))
   end
   alias generic_audit_installed audit_installed
 
@@ -286,6 +341,31 @@ module FormulaCellarChecks
 
   def relative_glob(dir, pattern)
     File.directory?(dir) ? Dir.chdir(dir) { Dir[pattern] } : []
+  end
+
+  def cpuid_instruction?(file, objdump = "objdump")
+    @instruction_column_index ||= {}
+    @instruction_column_index[objdump] ||= begin
+      objdump_version = Utils.popen_read(objdump, "--version")
+
+      if (objdump_version.match?(/^Apple LLVM/) && MacOS.version <= :mojave) ||
+         objdump_version.exclude?("LLVM")
+        2 # Mojave `objdump` or GNU Binutils `objdump`
+      else
+        1 # `llvm-objdump` or Catalina+ `objdump`
+      end
+    end
+
+    has_cpuid_instruction = false
+    Utils.popen_read(objdump, "--disassemble", file) do |io|
+      until io.eof?
+        instruction = io.readline.split("\t")[@instruction_column_index[objdump]]&.strip
+        has_cpuid_instruction = instruction == "cpuid" if instruction.present?
+        break if has_cpuid_instruction
+      end
+    end
+
+    has_cpuid_instruction
   end
 end
 

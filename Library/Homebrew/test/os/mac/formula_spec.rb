@@ -1,3 +1,4 @@
+# typed: false
 # frozen_string_literal: true
 
 require "test/support/fixtures/testball"
@@ -18,10 +19,8 @@ describe Formula do
       end
 
       expect(f.class.stable.deps).to be_empty
-      expect(f.class.devel.deps).to be_empty
       expect(f.class.head.deps).to be_empty
       expect(f.class.stable.uses_from_macos_elements.first).to eq("foo")
-      expect(f.class.devel.uses_from_macos_elements.first).to eq("foo")
       expect(f.class.head.uses_from_macos_elements.first).to eq("foo")
     end
 
@@ -33,10 +32,8 @@ describe Formula do
       end
 
       expect(f.class.stable.deps.first.name).to eq("foo")
-      expect(f.class.devel.deps.first.name).to eq("foo")
       expect(f.class.head.deps.first.name).to eq("foo")
       expect(f.class.stable.uses_from_macos_elements).to be_empty
-      expect(f.class.devel.uses_from_macos_elements).to be_empty
       expect(f.class.head.uses_from_macos_elements).to be_empty
     end
   end
@@ -64,9 +61,7 @@ describe Formula do
       expect(f.class.stable.deps[1].name).to eq("hello_macos")
       expect(f.class.stable.deps[2]).to eq(nil)
     end
-  end
 
-  describe "#on_macos" do
     it "adds a patch on Mac only" do
       f = formula do
         homepage "https://brew.sh"
@@ -89,9 +84,7 @@ describe Formula do
       expect(f.patchlist.first.strip).to eq(:p1)
       expect(f.patchlist.first.url).to eq("patch_macos")
     end
-  end
 
-  describe "#on_macos" do
     it "uses on_macos within a resource block" do
       f = formula do
         homepage "https://brew.sh"
@@ -115,6 +108,12 @@ describe Formula do
       f = Testball.new
       expect(f.shared_library("foobar")).to eq("foobar.dylib")
       expect(f.shared_library("foobar", 2)).to eq("foobar.2.dylib")
+      expect(f.shared_library("foobar", nil)).to eq("foobar.dylib")
+      expect(f.shared_library("foobar", "*")).to eq("foobar{,.*}.dylib")
+      expect(f.shared_library("*")).to eq("*.dylib")
+      expect(f.shared_library("*", 2)).to eq("*.2.dylib")
+      expect(f.shared_library("*", nil)).to eq("*.dylib")
+      expect(f.shared_library("*", "*")).to eq("*.dylib")
     end
   end
 end

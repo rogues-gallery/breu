@@ -26,26 +26,32 @@
 - [Python](Homebrew-and-Python.md)
 - [How To Build Software Outside Homebrew With Homebrew `keg_only` dependencies](How-to-Build-Software-Outside-Homebrew-with-Homebrew-keg-only-Dependencies.md)
 - [Xcode](Xcode.md)
-- [Kickstarter Supporters](Kickstarter-Supporters.md)
 
 - [Creating a Homebrew Issue](Creating-a-Homebrew-Issue.md)
 - [Updating Software in Homebrew](Updating-Software-in-Homebrew.md)
 - [Adding Software to Homebrew](Adding-Software-to-Homebrew.md)
 
+- [Kickstarter Supporters](Kickstarter-Supporters.md)
+
 ## Contributors
 
 - [How To Open A Pull Request (and get it merged)](How-To-Open-a-Homebrew-Pull-Request.md)
 - [Formula Cookbook](Formula-Cookbook.md)
+- [Cask Cookbook](Cask-Cookbook.md)
 - [Acceptable Formulae](Acceptable-Formulae.md)
+- [Acceptable Casks](Acceptable-Casks.md)
 - [License Guidelines](License-Guidelines.md)
 - [Formulae Versions](Versions.md)
+- [Deprecating, Disabling, and Removing Formulae](Deprecating-Disabling-and-Removing-Formulae.md)
 - [Node for Formula Authors](Node-for-Formula-Authors.md)
 - [Python for Formula Authors](Python-for-Formula-Authors.md)
+- [`brew livecheck`](Brew-Livecheck.md)
 - [Migrating A Formula To A Tap](Migrating-A-Formula-To-A-Tap.md)
 - [Rename A Formula](Rename-A-Formula.md)
 - [Building Against Non-Homebrew Dependencies](Building-Against-Non-Homebrew-Dependencies.md)
 - [How To Create (And Maintain) A Tap](How-to-Create-and-Maintain-a-Tap.md)
 - [Brew Test Bot](Brew-Test-Bot.md)
+- [Diagram Guidelines](Diagram-Guidelines.md)
 - [Prose Style Guidelines](Prose-Style-Guidelines.md)
 - [Type Checking with Sorbet](Typechecking.md)
 
@@ -53,13 +59,17 @@
 
 - [New Maintainer Checklist](New-Maintainer-Checklist.md)
 - [Maintainers: Avoiding Burnout](Maintainers-Avoiding-Burnout.md)
+
 - [Maintainer Guidelines](Maintainer-Guidelines.md)
+- [Homebrew/brew Maintainer Guide](Homebrew-brew-Maintainer-Guide.md)
+- [Homebrew/homebrew-core Maintainer Guide](Homebrew-homebrew-core-Maintainer-Guide.md)
 - [Homebrew/linuxbrew-core Maintainer Guide](Homebrew-linuxbrew-core-Maintainer-Guide.md)
+- [Homebrew/homebrew-cask Maintainer Guide](Homebrew-homebrew-cask-Maintainer-Guide.md)
+
 - [Brew Test Bot For Maintainers](Brew-Test-Bot-For-Core-Contributors.md)
 - [Common Issues for Maintainers](Common-Issues-for-Core-Contributors.md)
 - [Releases](Releases.md)
 - [Developer/Internal API Documentation](https://rubydoc.brew.sh)
-- [Homebrew/homebrew-core merge checklist](Homebrew-homebrew-core-Merge-Checklist.md)
 
 ## Governance
 

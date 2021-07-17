@@ -1,22 +1,25 @@
+# typed: true
 # frozen_string_literal: true
 
 require "cli/parser"
 require "utils/spdx"
 
 module Homebrew
+  extend T::Sig
+
   module_function
 
+  sig { returns(CLI::Parser) }
   def update_license_data_args
     Homebrew::CLI::Parser.new do
-      usage_banner <<~EOS
-        `update-license-data` [<options>]
-
-         Update SPDX license data in the Homebrew repository.
+      description <<~EOS
+        Update SPDX license data in the Homebrew repository.
       EOS
       switch "--fail-if-not-changed",
              description: "Return a failing status code if current license data's version is the same as " \
                           "the upstream. This can be used to notify CI when the SPDX license data is out of date."
-      max_named 0
+
+      named_args :none
     end
   end
 

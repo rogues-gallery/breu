@@ -1,3 +1,4 @@
+# typed: false
 # frozen_string_literal: true
 
 require "missing_formula"
@@ -9,22 +10,24 @@ require "keg"
 require "tab"
 require "json"
 require "utils/spdx"
+require "deprecate_disable"
 
 module Homebrew
+  extend T::Sig
+
   module_function
 
   VALID_DAYS = %w[30 90 365].freeze
   VALID_FORMULA_CATEGORIES = %w[install install-on-request build-error].freeze
   VALID_CATEGORIES = (VALID_FORMULA_CATEGORIES + %w[cask-install os-version]).freeze
 
+  sig { returns(CLI::Parser) }
   def info_args
     Homebrew::CLI::Parser.new do
-      usage_banner <<~EOS
-        `info` [<options>] [<formula>]
-
+      description <<~EOS
         Display brief statistics for your Homebrew installation.
 
-        If <formula> is provided, show summary of information about <formula>.
+        If a <formula> or <cask> is provided, show summary of information about it.
       EOS
       switch "--analytics",
              description: "List global Homebrew analytics data or, if specified, installation and "\
@@ -44,9 +47,13 @@ module Homebrew
              description: "Open the GitHub source page for <formula> in a browser. "\
                           "To view formula history locally: `brew log -p` <formula>"
       flag   "--json",
-             description: "Print a JSON representation of <formula>. Currently the default and only accepted "\
-                          "value for <version> is `v1`. See the docs for examples of using the JSON "\
-                          "output: <https://docs.brew.sh/Querying-Brew>"
+             description: "Print a JSON representation. Currently the default value for <version> is `v1` for "\
+                          "<formula>. For <formula> and <cask> use `v2`. See the docs for examples of using the "\
+                          "JSON output: <https://docs.brew.sh/Querying-Brew>"
+      switch "--bottle",
+             depends_on:  "--json",
+             description: "Output information about the bottles for <formula> and its dependencies.",
+             hidden:      true
       switch "--installed",
              depends_on:  "--json",
              description: "Print JSON of formulae that are currently installed."
@@ -55,88 +62,163 @@ module Homebrew
              description: "Print JSON of all available formulae."
       switch "-v", "--verbose",
              description: "Show more verbose analytics data for <formula>."
+      switch "--formula", "--formulae",
+             description: "Treat all named arguments as formulae."
+      switch "--cask", "--casks",
+             description: "Treat all named arguments as casks."
 
       conflicts "--installed", "--all"
+      conflicts "--formula", "--cask"
+
+      %w[--cask --analytics --github].each do |conflict|
+        conflicts "--bottle", conflict
+      end
+
+      named_args [:formula, :cask]
     end
   end
 
+  sig { void }
   def info
     args = info_args.parse
 
-    if args.days.present?
-      raise UsageError, "--days must be one of #{VALID_DAYS.join(", ")}" unless VALID_DAYS.include?(args.days)
-    end
-
-    if args.category.present?
-      if args.named.present? && !VALID_FORMULA_CATEGORIES.include?(args.category)
-        raise UsageError, "--category must be one of #{VALID_FORMULA_CATEGORIES.join(", ")} when querying formulae"
+    if args.analytics?
+      if args.days.present? && VALID_DAYS.exclude?(args.days)
+        raise UsageError, "--days must be one of #{VALID_DAYS.join(", ")}"
       end
 
-      unless VALID_CATEGORIES.include?(args.category)
-        raise UsageError, "--category must be one of #{VALID_CATEGORIES.join(", ")}"
-      end
-    end
+      if args.category.present?
+        if args.named.present? && VALID_FORMULA_CATEGORIES.exclude?(args.category)
+          raise UsageError, "--category must be one of #{VALID_FORMULA_CATEGORIES.join(", ")} when querying formulae"
+        end
 
-    if args.json
-      raise UsageError, "invalid JSON version: #{args.json}" unless ["v1", true].include? args.json
-
-      if !(args.all? || args.installed?) && args.no_named?
-        raise FormulaUnspecifiedError if args.no_named?
+        unless VALID_CATEGORIES.include?(args.category)
+          raise UsageError, "--category must be one of #{VALID_CATEGORIES.join(", ")}"
+        end
       end
 
+      print_analytics(args: args)
+    elsif args.json
       print_json(args: args)
     elsif args.github?
-      raise FormulaUnspecifiedError if args.no_named?
+      raise FormulaOrCaskUnspecifiedError if args.no_named?
 
-      exec_browser(*args.named.to_formulae.map { |f| github_info(f) })
+      exec_browser(*args.named.to_formulae_and_casks.map { |f| github_info(f) })
+    elsif args.no_named?
+      print_statistics
     else
       print_info(args: args)
     end
   end
 
-  def print_info(args:)
+  sig { void }
+  def print_statistics
+    return unless HOMEBREW_CELLAR.exist?
+
+    count = Formula.racks.length
+    puts "#{count} #{"keg".pluralize(count)}, #{HOMEBREW_CELLAR.dup.abv}"
+  end
+
+  sig { params(args: CLI::Args).void }
+  def print_analytics(args:)
     if args.no_named?
-      if args.analytics?
-        Utils::Analytics.output(args: args)
-      elsif HOMEBREW_CELLAR.exist?
-        count = Formula.racks.length
-        puts "#{count} #{"keg".pluralize(count)}, #{HOMEBREW_CELLAR.dup.abv}"
-      end
-    else
-      args.named.each_with_index do |f, i|
-        puts unless i.zero?
-        begin
-          formula = Formulary.factory(f)
-          if args.analytics?
-            Utils::Analytics.formula_output(formula, args: args)
-          else
-            info_formula(formula, args: args)
-          end
-        rescue FormulaUnavailableError => e
-          if args.analytics?
-            Utils::Analytics.output(filter: f, args: args)
-            next
-          end
-          ofail e.message
-          # No formula with this name, try a missing formula lookup
-          if (reason = MissingFormula.reason(f, show_info: true))
-            $stderr.puts reason
-          end
-        end
+      Utils::Analytics.output(args: args)
+      return
+    end
+
+    args.named.to_formulae_and_casks_and_unavailable.each_with_index do |obj, i|
+      puts unless i.zero?
+
+      case obj
+      when Formula
+        Utils::Analytics.formula_output(obj, args: args)
+      when Cask::Cask
+        Utils::Analytics.cask_output(obj, args: args)
+      when FormulaOrCaskUnavailableError
+        Utils::Analytics.output(filter: obj.name, args: args)
+      else
+        raise
       end
     end
   end
 
-  def print_json(args:)
-    ff = if args.all?
-      Formula.sort
-    elsif args.installed?
-      Formula.installed.sort
-    else
-      args.named.to_formulae
+  sig { params(args: CLI::Args).void }
+  def print_info(args:)
+    args.named.to_formulae_and_casks_and_unavailable.each_with_index do |obj, i|
+      puts unless i.zero?
+
+      case obj
+      when Formula
+        info_formula(obj, args: args)
+      when Cask::Cask
+        info_cask(obj, args: args)
+      when FormulaOrCaskUnavailableError
+        ofail obj.message
+        # No formula with this name, try a missing formula lookup
+        if (reason = MissingFormula.reason(obj.name, show_info: true))
+          $stderr.puts reason
+        end
+      else
+        raise
+      end
     end
-    json = ff.map(&:to_hash)
-    puts JSON.generate(json)
+  end
+
+  def json_version(version)
+    version_hash = {
+      true => :default,
+      "v1" => :v1,
+      "v2" => :v2,
+    }
+
+    raise UsageError, "invalid JSON version: #{version}" unless version_hash.include?(version)
+
+    version_hash[version]
+  end
+
+  sig { params(args: CLI::Args).void }
+  def print_json(args:)
+    raise FormulaOrCaskUnspecifiedError if !(args.all? || args.installed?) && args.no_named?
+
+    json = case json_version(args.json)
+    when :v1, :default
+      raise UsageError, "cannot specify --cask with --json=v1!" if args.cask?
+
+      formulae = if args.all?
+        Formula.sort
+      elsif args.installed?
+        Formula.installed.sort
+      else
+        args.named.to_formulae
+      end
+
+      if args.bottle?
+        formulae.map(&:to_recursive_bottle_hash)
+      else
+        formulae.map(&:to_hash)
+      end
+    when :v2
+      formulae, casks = if args.all?
+        [Formula.sort, Cask::Cask.to_a.sort_by(&:full_name)]
+      elsif args.installed?
+        [Formula.installed.sort, Cask::Caskroom.casks.sort_by(&:full_name)]
+      else
+        args.named.to_formulae_to_casks
+      end
+
+      if args.bottle?
+        { "formulae" => formulae.map(&:to_recursive_bottle_hash) }
+      else
+        {
+          "formulae" => formulae.map(&:to_hash),
+          "casks"    => casks.map(&:to_h),
+        }
+      end
+    else
+      raise
+    end
+
+    puts JSON.pretty_generate(json)
   end
 
   def github_remote_path(remote, path)
@@ -148,29 +230,32 @@ module Homebrew
   end
 
   def github_info(f)
-    if f.tap
-      if remote = f.tap.remote
-        path = f.path.relative_path_from(f.tap.path)
-        github_remote_path(remote, path)
-      else
-        f.path
-      end
-    else
-      f.path
+    return f.path if f.tap.blank? || f.tap.remote.blank?
+
+    path = if f.class.superclass == Formula
+      f.path.relative_path_from(f.tap.path)
+    elsif f.is_a?(Cask::Cask)
+      f.sourcefile_path.relative_path_from(f.tap.path)
     end
+    github_remote_path(f.tap.remote, path)
   end
 
   def info_formula(f, args:)
     specs = []
 
-    if stable = f.stable
-      s = "stable #{stable.version}"
-      s += " (bottled)" if stable.bottled?
-      specs << s
-    end
+    if ENV["HOMEBREW_JSON_CORE"].present? && BottleAPI.bottle_available?(f.name)
+      info = BottleAPI.fetch(f.name)
 
-    if devel = f.devel
-      specs << "devel #{devel.version}"
+      latest_version = info["pkg_version"].split("_").first
+      bottle_exists = info["bottles"].key?(Utils::Bottles.tag.to_s) || info["bottles"].key?("all")
+
+      s = "stable #{latest_version}"
+      s += " (bottled)" if bottle_exists
+      specs << s
+    elsif (stable = f.stable)
+      s = "stable #{stable.version}"
+      s += " (bottled)" if stable.bottled? && f.pour_bottle?
+      specs << s
     end
 
     specs << "HEAD" if f.head
@@ -182,6 +267,15 @@ module Homebrew
     puts "#{f.full_name}: #{specs * ", "}#{" [#{attrs * ", "}]" unless attrs.empty?}"
     puts f.desc if f.desc
     puts Formatter.url(f.homepage) if f.homepage
+
+    deprecate_disable_type, deprecate_disable_reason = DeprecateDisable.deprecate_disable_info f
+    if deprecate_disable_type.present?
+      if deprecate_disable_reason.present?
+        puts "#{deprecate_disable_type.capitalize} because it #{deprecate_disable_reason}!"
+      else
+        puts "#{deprecate_disable_type.capitalize}!"
+      end
+    end
 
     conflicts = f.conflicts.map do |c|
       reason = " (because #{c.reason})" if c.reason
@@ -232,7 +326,7 @@ module Homebrew
       end
     end
 
-    if !f.options.empty? || f.head || f.devel
+    if !f.options.empty? || f.head
       ohai "Options"
       Options.dump_for_formula f
     end
@@ -266,5 +360,12 @@ module Homebrew
     return dep.name if dep.option_tags.empty?
 
     "#{dep.name} #{dep.option_tags.map { |o| "--#{o}" }.join(" ")}"
+  end
+
+  def info_cask(cask, args:)
+    require "cask/cmd"
+    require "cask/cmd/info"
+
+    Cask::Cmd::Info.info(cask)
   end
 end

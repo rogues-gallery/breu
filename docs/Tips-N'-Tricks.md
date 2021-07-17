@@ -5,30 +5,15 @@
 The supported method of installing specific versions of
 some formulae is to see if there is a versioned formula (e.g. `gcc@7`) available. If the version you’re looking for isn’t available, consider using `brew extract`.
 
-## Quickly remove something from `/usr/local`
+## Quickly remove something from Homebrew's prefix
 
 ```sh
 brew unlink <formula>
 ```
 
-This can be useful if a package can't build against the version of something you have linked into `/usr/local`.
+This can be useful if a package can't build against the version of something you have linked into Homebrew's prefix.
 
 And of course, you can simply `brew link <formula>` again afterwards!
-
-## Activate a previously installed version of a formula
-
-```sh
-brew info <formula>
-brew switch <formula> <version>
-```
-
-Use `brew info <formula>` to check what versions are installed but not currently activated, then `brew switch <formula> <version>` to activate the desired version. This can be useful if you would like to switch between versions of a formula.
-
-## Install into Homebrew without formulae
-
-```sh
-./configure --prefix=/usr/local/Cellar/foo/1.2 && make && make install && brew link foo
-```
 
 ## Pre-downloading a file for a formula
 Sometimes it's faster to download a file via means other than those
@@ -67,7 +52,7 @@ brew install --only-dependencies <formula>
 ```sh
 $ brew irb
 1.8.7 :001 > Formula.factory("ace").methods - Object.methods
- => [:install, :path, :homepage, :downloader, :stable, :bottle, :devel, :head, :active_spec, :buildpath, :ensure_specs_set, :url, :version, :specs, :mirrors, :installed?, :explicitly_requested?, :linked_keg, :installed_prefix, :prefix, :rack, :bin, :doc, :include, :info, :lib, :libexec, :man, :man1, :man2, :man3, :man4, :man5, :man6, :man7, :man8, :sbin, :share, :etc, :var, :plist_name, :plist_path, :download_strategy, :cached_download, :caveats, :options, :patches, :keg_only?, :fails_with?, :skip_clean?, :brew, :std_cmake_args, :deps, :external_deps, :recursive_deps, :system, :fetch, :verify_download_integrity, :fails_with_llvm, :fails_with_llvm?, :std_cmake_parameters, :mkdir, :mktemp]
+ => [:install, :path, :homepage, :downloader, :stable, :bottle, :head, :active_spec, :buildpath, :ensure_specs_set, :url, :version, :specs, :mirrors, :installed?, :explicitly_requested?, :linked_keg, :installed_prefix, :prefix, :rack, :bin, :doc, :include, :info, :lib, :libexec, :man, :man1, :man2, :man3, :man4, :man5, :man6, :man7, :man8, :sbin, :share, :etc, :var, :plist_name, :plist_path, :download_strategy, :cached_download, :caveats, :options, :patches, :keg_only?, :fails_with?, :skip_clean?, :brew, :std_cmake_args, :deps, :external_deps, :recursive_deps, :system, :fetch, :verify_download_integrity, :fails_with_llvm, :fails_with_llvm?, :std_cmake_parameters, :mkdir, :mktemp]
 1.8.7 :002 >
 ```
 

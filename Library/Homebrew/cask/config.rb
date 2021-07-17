@@ -1,3 +1,4 @@
+# typed: true
 # frozen_string_literal: true
 
 require "json"
@@ -13,6 +14,8 @@ module Cask
   #
   # @api private
   class Config
+    extend T::Sig
+
     DEFAULT_DIRS = {
       appdir:               "/Applications",
       colorpickerdir:       "~/Library/ColorPickers",
@@ -36,36 +39,43 @@ module Cask
       }.merge(DEFAULT_DIRS).freeze
     end
 
-    def self.global
-      @global ||= new
+    sig { params(args: Homebrew::CLI::Args).returns(T.attached_class) }
+    def self.from_args(args)
+      new(explicit: {
+        appdir:               args.appdir,
+        colorpickerdir:       args.colorpickerdir,
+        prefpanedir:          args.prefpanedir,
+        qlplugindir:          args.qlplugindir,
+        mdimporterdir:        args.mdimporterdir,
+        dictionarydir:        args.dictionarydir,
+        fontdir:              args.fontdir,
+        servicedir:           args.servicedir,
+        input_methoddir:      args.input_methoddir,
+        internet_plugindir:   args.internet_plugindir,
+        audio_unit_plugindir: args.audio_unit_plugindir,
+        vst_plugindir:        args.vst_plugindir,
+        vst3_plugindir:       args.vst3_plugindir,
+        screen_saverdir:      args.screen_saverdir,
+        languages:            args.language,
+      }.compact)
     end
 
-    def self.clear
-      @global = nil
-    end
-
-    def self.for_cask(cask)
-      if cask.config_path.exist?
-        from_json(File.read(cask.config_path))
-      else
-        global
-      end
-    end
-
-    def self.from_json(json)
-      config = begin
-        JSON.parse(json)
-      rescue JSON::ParserError => e
-        raise e, "Cannot parse #{path}: #{e}", e.backtrace
-      end
+    sig { params(json: String, ignore_invalid_keys: T::Boolean).returns(T.attached_class) }
+    def self.from_json(json, ignore_invalid_keys: false)
+      config = JSON.parse(json)
 
       new(
-        default:  config.fetch("default",  {}),
-        env:      config.fetch("env",      {}),
-        explicit: config.fetch("explicit", {}),
+        default:             config.fetch("default",  {}),
+        env:                 config.fetch("env",      {}),
+        explicit:            config.fetch("explicit", {}),
+        ignore_invalid_keys: ignore_invalid_keys,
       )
     end
 
+    sig {
+      params(config: T::Enumerable[[T.any(String, Symbol), T.any(String, Pathname, T::Array[String])]])
+        .returns(T::Hash[Symbol, T.any(String, Pathname, T::Array[String])])
+    }
     def self.canonicalize(config)
       config.map do |k, v|
         key = k.to_sym
@@ -78,52 +88,72 @@ module Cask
       end.to_h
     end
 
+    sig { returns(T::Hash[Symbol, T.any(String, Pathname, T::Array[String])]) }
     attr_accessor :explicit
 
-    def initialize(default: nil, env: nil, explicit: {})
+    sig {
+      params(
+        default:             T.nilable(T::Hash[Symbol, T.any(String, Pathname, T::Array[String])]),
+        env:                 T.nilable(T::Hash[Symbol, T.any(String, Pathname, T::Array[String])]),
+        explicit:            T::Hash[Symbol, T.any(String, Pathname, T::Array[String])],
+        ignore_invalid_keys: T::Boolean,
+      ).void
+    }
+    def initialize(default: nil, env: nil, explicit: {}, ignore_invalid_keys: false)
       @default = self.class.canonicalize(self.class.defaults.merge(default)) if default
       @env = self.class.canonicalize(env) if env
       @explicit = self.class.canonicalize(explicit)
+
+      if ignore_invalid_keys
+        @env&.delete_if { |key, _| self.class.defaults.keys.exclude?(key) }
+        @explicit.delete_if { |key, _| self.class.defaults.keys.exclude?(key) }
+        return
+      end
 
       @env&.assert_valid_keys!(*self.class.defaults.keys)
       @explicit.assert_valid_keys!(*self.class.defaults.keys)
     end
 
+    sig { returns(T::Hash[Symbol, T.any(String, Pathname, T::Array[String])]) }
     def default
       @default ||= self.class.canonicalize(self.class.defaults)
     end
 
+    sig { returns(T::Hash[Symbol, T.any(String, Pathname, T::Array[String])]) }
     def env
       @env ||= self.class.canonicalize(
-        Shellwords.shellsplit(ENV.fetch("HOMEBREW_CASK_OPTS", ""))
-                  .select { |arg| arg.include?("=") }
-                  .map { |arg| arg.split("=", 2) }
-                  .map do |(flag, value)|
-                    key = flag.sub(/^--/, "")
+        Homebrew::EnvConfig.cask_opts
+          .select { |arg| arg.include?("=") }
+          .map { |arg| T.cast(arg.split("=", 2), [String, String]) }
+          .map do |(flag, value)|
+            key = flag.sub(/^--/, "")
+            # converts --language flag to :languages config key
+            if key == "language"
+              key = "languages"
+              value = value.split(",")
+            end
 
-                    if key == "language"
-                      key = "languages"
-                      value = value.split(",")
-                    end
-
-                    [key, value]
-                  end,
+            [key, value]
+          end,
       )
     end
 
+    sig { returns(Pathname) }
     def binarydir
       @binarydir ||= HOMEBREW_PREFIX/"bin"
     end
 
+    sig { returns(Pathname) }
     def manpagedir
       @manpagedir ||= HOMEBREW_PREFIX/"share/man"
     end
 
+    sig { returns(T::Array[String]) }
     def languages
       [
-        *explicit[:languages],
-        *env[:languages],
-        *default[:languages],
+        *T.cast(explicit.fetch(:languages, []), T::Array[String]),
+        *T.cast(env.fetch(:languages, []), T::Array[String]),
+        *T.cast(default.fetch(:languages, []), T::Array[String]),
       ].uniq.select do |lang|
         # Ensure all languages are valid.
         Locale.parse(lang)
@@ -147,16 +177,30 @@ module Cask
       end
     end
 
+    sig { params(other: Config).returns(T.self_type) }
     def merge(other)
       self.class.new(explicit: other.explicit.merge(explicit))
     end
 
-    def to_json(*args)
+    sig { returns(String) }
+    def explicit_s
+      explicit.map do |key, value|
+        # inverse of #env - converts :languages config key back to --language flag
+        if key == :languages
+          key = "language"
+          value = T.cast(explicit.fetch(:languages, []), T::Array[String]).join(",")
+        end
+        "#{key}: \"#{value.to_s.sub(/^#{ENV['HOME']}/, "~")}\""
+      end.join(", ")
+    end
+
+    sig { params(options: T.untyped).returns(String) }
+    def to_json(**options)
       {
         default:  default,
         env:      env,
         explicit: explicit,
-      }.to_json(*args)
+      }.to_json(**options)
     end
   end
 end

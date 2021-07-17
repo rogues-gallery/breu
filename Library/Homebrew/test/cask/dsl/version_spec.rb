@@ -1,3 +1,4 @@
+# typed: false
 # frozen_string_literal: true
 
 describe Cask::DSL::Version, :cask do
@@ -50,6 +51,14 @@ describe Cask::DSL::Version, :cask do
   end
 
   let(:version) { described_class.new(raw_version) }
+
+  describe "#initialize" do
+    it "raises an error when the version contains a slash" do
+      expect {
+        described_class.new("0.1,../../directory/traversal")
+      }.to raise_error(TypeError, %r{invalid characters: /})
+    end
+  end
 
   describe "#==" do
     subject { version == other }

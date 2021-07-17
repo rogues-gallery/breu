@@ -1,13 +1,12 @@
+# typed: false
 # frozen_string_literal: true
 
 require "cmd/shared_examples/args_parse"
 
-describe "Homebrew.missing_args" do
+describe "brew missing" do
   it_behaves_like "parseable arguments"
-end
 
-describe "brew missing", :integration_test do
-  it "prints missing dependencies" do
+  it "prints missing dependencies", :integration_test do
     setup_test_formula "foo"
     setup_test_formula "bar"
 

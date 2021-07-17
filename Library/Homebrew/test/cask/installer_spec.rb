@@ -1,3 +1,4 @@
+# typed: false
 # frozen_string_literal: true
 
 describe Cask::Installer, :cask do
@@ -15,7 +16,7 @@ describe Cask::Installer, :cask do
       expect(caffeine.config.appdir.join("Caffeine.app")).to be_a_directory
     end
 
-    it "works with dmg-based Casks" do
+    it "works with HFS+ dmg-based Casks" do
       asset = Cask::CaskLoader.load(cask_path("container-dmg"))
 
       described_class.new(asset).install
@@ -64,14 +65,14 @@ describe Cask::Installer, :cask do
       bad_checksum = Cask::CaskLoader.load(cask_path("bad-checksum"))
       expect {
         described_class.new(bad_checksum).install
-      }.to raise_error(Cask::CaskSha256MismatchError)
+      }.to raise_error(ChecksumMismatchError)
     end
 
     it "blows up on a missing checksum" do
       missing_checksum = Cask::CaskLoader.load(cask_path("missing-checksum"))
       expect {
         described_class.new(missing_checksum).install
-      }.to raise_error(Cask::CaskSha256MissingError)
+      }.to output(/Cannot verify integrity/).to_stderr
     end
 
     it "installs fine if sha256 :no_check is used" do
@@ -86,7 +87,7 @@ describe Cask::Installer, :cask do
       no_checksum = Cask::CaskLoader.load(cask_path("no-checksum"))
       expect {
         described_class.new(no_checksum, require_sha: true).install
-      }.to raise_error(Cask::CaskNoShasumError)
+      }.to raise_error(/--require-sha/)
     end
 
     it "installs fine if sha256 :no_check is used with --require-sha and --force" do
@@ -115,11 +116,10 @@ describe Cask::Installer, :cask do
       }.to output(
         <<~EOS,
           ==> Downloading file://#{HOMEBREW_LIBRARY_PATH}/test/support/fixtures/cask/caffeine.zip
-          ==> Verifying SHA-256 checksum for Cask 'with-installer-manual'.
           ==> Installing Cask with-installer-manual
           To complete the installation of Cask with-installer-manual, you must also
           run the installer at:
-            '#{with_installer_manual.staged_path.join("Caffeine.app")}'
+            #{with_installer_manual.staged_path.join("Caffeine.app")}
           🍺  with-installer-manual was successfully installed!
         EOS
       ).to_stdout
@@ -195,7 +195,7 @@ describe Cask::Installer, :cask do
 
       described_class.new(nested_app).install
 
-      expect(Cask::Config.global.appdir.join("MyNestedApp.app")).to be_a_directory
+      expect(nested_app.config.appdir.join("MyNestedApp.app")).to be_a_directory
     end
 
     it "generates and finds a timestamped metadata directory for an installed Cask" do

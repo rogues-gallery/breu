@@ -1,3 +1,4 @@
+# typed: false
 # frozen_string_literal: true
 
 require "cask/utils"
@@ -21,10 +22,8 @@ module Cask
         @command.run!(executable, **options)
       end
 
-      def respond_to_missing?(*)
-        super
-      end
-
+      # No need to define it as it's the default/superclass implementation.
+      # rubocop:disable Style/MissingRespondToMissing
       def method_missing(method, *)
         if method
           underscored_class = self.class.name.gsub(/([[:lower:]])([[:upper:]][[:lower:]])/, '\1_\2').downcase
@@ -35,6 +34,7 @@ module Cask
           super
         end
       end
+      # rubocop:enable Style/MissingRespondToMissing
     end
   end
 end

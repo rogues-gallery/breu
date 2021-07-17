@@ -1,12 +1,19 @@
+# typed: true
 # frozen_string_literal: true
+
+require "system_command"
 
 module UnpackStrategy
   # Strategy for unpacking tar archives.
   class Tar
+    extend T::Sig
+
     include UnpackStrategy
+    extend SystemCommand::Mixin
 
     using Magic
 
+    sig { returns(T::Array[String]) }
     def self.extensions
       [
         ".tar",
@@ -23,12 +30,13 @@ module UnpackStrategy
       return false unless [Bzip2, Gzip, Lzip, Xz].any? { |s| s.can_extract?(path) }
 
       # Check if `tar` can list the contents, then it can also extract it.
-      stdout, _, status = system_command("tar", args: ["tf", path], print_stderr: false)
+      stdout, _, status = system_command("tar", args: ["--list", "--file", path], print_stderr: false)
       status.success? && !stdout.empty?
     end
 
     private
 
+    sig { override.params(unpack_dir: Pathname, basename: Pathname, verbose: T::Boolean).returns(T.untyped) }
     def extract_to_dir(unpack_dir, basename:, verbose:)
       Dir.mktmpdir do |tmpdir|
         tar_path = path
@@ -40,7 +48,9 @@ module UnpackStrategy
         end
 
         system_command! "tar",
-                        args:    ["xof", tar_path, "-C", unpack_dir],
+                        args:    ["--extract", "--no-same-owner",
+                                  "--file", tar_path,
+                                  "--directory", unpack_dir],
                         verbose: verbose
       end
     end

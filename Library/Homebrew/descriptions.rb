@@ -1,3 +1,4 @@
+# typed: true
 # frozen_string_literal: true
 
 require "formula"
@@ -51,7 +52,7 @@ class Descriptions
   private
 
   def short_names
-    @short_names ||= Hash[@descriptions.keys.map { |k| [k, k.split("/").last] }]
+    @short_names ||= @descriptions.keys.map { |k| [k, k.split("/").last] }.to_h
   end
 
   def short_name_counts
